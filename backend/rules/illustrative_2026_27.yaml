@@ -1,0 +1,36 @@
+# IMPORTANT: Illustrative prototype rules only. NOT an official AICTE rule pack.
+# Compliance lead must map each rule to exact applicable clause/page and approve before production use.
+rule_pack_id: brocode-illustrative-2026-27-v1
+academic_year: 2026-27
+source_document: "AICTE Approval Process Handbook 2024-25 to 2026-27 (official PDF; validate current corrigenda)"
+source_url: "https://aicte-qa.aicte-india.org/sites/default/files/APH%20Final.pdf"
+status: illustrative_unapproved
+rules:
+  - id: DOC-001
+    title: Required document is present
+    severity: high
+    type: required_document
+    required: true
+    official_clause: null
+    note: Configure required document types for the selected application category only after official review.
+  - id: DOC-002
+    title: Document issuer authenticity
+    severity: high
+    type: issuer_verification
+    required: true
+    official_clause: null
+    note: No authorized live issuer API configured; must return manual verification required.
+  - id: DOC-003
+    title: Duplicate file hash check
+    severity: medium
+    type: duplicate_hash
+    required: false
+    official_clause: null
+    note: Duplicate file is a review signal, not proof of fraud.
+  - id: DOC-004
+    title: Text extraction availability
+    severity: low
+    type: text_extraction
+    required: false
+    official_clause: null
+    note: Low-quality scans require manual review.

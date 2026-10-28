@@ -1,0 +1,43 @@
+
+# Environments and Secrets
+backend/.venv/
+.venv/
+backend/.env
+.env
+.env.*
+!.env.example
+!backend/.env.example
+.env.local
+.env.*.local
+!.env.example.local
+
+# Databases and Local Storage
+backend/brocode.db
+backend/*.db
+*.db
+*.sqlite
+*.sqlite3
+backend/uploads/
+backend/test_uploads/
+uploads/
+test_uploads/
+
+# Build and Dependency Directories
+frontend/node_modules/
+node_modules/
+frontend/dist/
+dist/
+build/
+
+# Caches and Temporary Files
+__pycache__/
+*/__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.DS_Store
+Thumbs.db
+
+# Archives
+*.zip
+*.tar.gz
