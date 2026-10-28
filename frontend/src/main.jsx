@@ -1,6 +1,6 @@
 import React,{useEffect,useState} from 'react';
 import{createRoot}from'react-dom/client';
-import{ShieldCheck,Building2,FileCheck2,ClipboardList,Search,Plus,LogOut,RefreshCw,AlertTriangle,CheckCircle2,Clock3,UploadCloud,ArrowUpRight,LockKeyhole,Activity,FileText,MessageSquare,Users,Eye,Download,UserCheck,Trash2,RefreshCcw}from'lucide-react';
+import{ShieldCheck,Building2,FileCheck2,ClipboardList,Search,Plus,LogOut,RefreshCw,AlertTriangle,CheckCircle2,Clock3,UploadCloud,ArrowUpRight,LockKeyhole,Activity,FileText,MessageSquare,Users,Eye,Download,UserCheck,UserX,Trash2,RefreshCcw,Info}from'lucide-react';
 import'./style.css';
 
 const DEMO={institution:['institution@example.com','DemoInstitution123!'],officer:['officer@example.com','DemoOfficer123!'],admin:['admin@example.com','DemoAdmin123!']};
@@ -25,6 +25,8 @@ function App(){
   const[findingRef,setFindingRef]=useState('');
   const[adminUsers,setAdminUsers]=useState([]);
   const[showAdminPanel,setShowAdminPanel]=useState(false);
+  const[officersList,setOfficersList]=useState([]);
+  const[selectedAssignee,setSelectedAssignee]=useState('');
 
   async function api(path,opts={}){
     const h={...(opts.headers||{})};
@@ -44,6 +46,10 @@ function App(){
       const a=await api(appUrl);
       setApps(a);
       if(me.role!=='institution')setSummary(await api('/api/officer/summary'));
+      if(me.role==='admin'||me.role==='officer'){
+        const offs = await api('/api/officers').catch(()=>[]);
+        setOfficersList(offs);
+      }
     }catch(e){setError(e.message);setToken('');localStorage.removeItem('bc_token')}
   }
 
@@ -63,7 +69,11 @@ function App(){
 
   async function openApp(a){
     setSelected(a);setDetail(null);setMemo('');setReviewNote('');setCorrectionInstructions('');setFindingRef('');setError('');
-    try{setDetail(await api(`/api/applications/${a.id}`))}catch(e){setError(e.message)}
+    try{
+      const d=await api(`/api/applications/${a.id}`);
+      setDetail(d);
+      setSelectedAssignee(d.application?.assigned_officer_id ? String(d.application.assigned_officer_id) : '');
+    }catch(e){setError(e.message)}
   }
 
   async function createApp(e){
@@ -176,11 +186,38 @@ function App(){
   }
 
   async function claimApp(){
+    setBusy(true);setError('');setSuccessMsg('');
     try{
       await api(`/api/applications/${selected.id}/assign`,{method:'PATCH',body:JSON.stringify({officer_id:user.id})});
+      setSuccessMsg(`Application #${selected.id} assigned to you.`);
       await refresh();
       await openApp(selected);
-    }catch(e){setError(e.message)}
+    }catch(e){setError(e.message)}finally{setBusy(false)}
+  }
+
+  async function releaseApp(){
+    const ok = window.confirm("Release your assignment and return this application to the unassigned triage queue?");
+    if(!ok)return;
+    setBusy(true);setError('');setSuccessMsg('');
+    try{
+      await api(`/api/applications/${selected.id}/assign`,{method:'PATCH',body:JSON.stringify({officer_id:null})});
+      setSuccessMsg("Assignment released. Application returned to triage queue.");
+      await refresh();
+      await openApp(selected);
+    }catch(e){setError(e.message)}finally{setBusy(false)}
+  }
+
+  async function adminAssignOfficer(targetOfficerId){
+    setBusy(true);setError('');setSuccessMsg('');
+    try{
+      const res=await api(`/api/applications/${selected.id}/assign`,{
+        method:'PATCH',
+        body:JSON.stringify({officer_id: targetOfficerId ? Number(targetOfficerId) : null})
+      });
+      setSuccessMsg(res.assigned_officer_name ? `Application assigned to ${res.assigned_officer_name}.` : "Application unassigned and returned to triage queue.");
+      await refresh();
+      await openApp(selected);
+    }catch(e){setError(e.message)}finally{setBusy(false)}
   }
 
   async function submitReview(){
@@ -220,10 +257,14 @@ function App(){
   const isOfficer = user.role === 'officer';
   const isAdmin = user.role === 'admin';
   const isOfficerOrAdmin = isOfficer || isAdmin;
-  const isAssignedOfficer = isOfficerOrAdmin && (isAdmin || detail?.application?.assigned_officer_id === user.id);
+  const assignedOfficerId = detail?.application?.assigned_officer_id;
+  const assignedOfficerName = detail?.application?.assigned_officer_name;
+  const isAssignedOfficer = isOfficer && assignedOfficerId === user.id;
+  const isUnassignedOfficer = isOfficer && !assignedOfficerId;
+  const isOtherOfficerAssigned = isOfficer && assignedOfficerId && assignedOfficerId !== user.id;
   const institutionDocs = (detail?.documents || []).filter(d => d.upload_type !== 'officer_evidence');
   const officerDocs = (detail?.documents || []).filter(d => d.upload_type === 'officer_evidence');
-  const activeDeficiency = detail?.reviews?.find(r => r.action === 'DEFICIENCY_REQUEST');
+  const activeDeficiency = detail?.reviews?.find(r => r.action === 'DEFICIENCY_REQUEST' || r.action === 'DEFICIENCY_RAISED');
 
   // --- Main App Shell ---
   return <div className="app-shell"><aside className="sidebar"><div className="brand"><span className="brand-icon"><ShieldCheck/></span><span>BroCode<span className="dot">.</span></span></div><div className="workspace-label">WORKSPACE</div>
@@ -257,7 +298,7 @@ function App(){
   <section className="panel"><div className="panel-heading"><div><h2>Applications</h2><p>Open a record to view documents and screening findings.</p></div><div style={{display:'flex',gap:'12px',alignItems:'center'}}>{isAdmin&&<label style={{display:'inline-flex',alignItems:'center',gap:'6px',fontSize:'11px',color:'#4a5568',cursor:'pointer'}}><input type="checkbox" checked={includeDrafts} onChange={e=>setIncludeDrafts(e.target.checked)}/> Include Drafts (Oversight View)</label>}<div className="search-box"><Search size={16}/><span>Search coming soon</span></div></div></div>
   {apps.length===0?<div className="empty"><div className="empty-icon"><Building2/></div><h3>No applications yet</h3><p>Create an application to begin document pre-screening.</p></div>:
   <div className="table-wrap"><table><thead><tr><th>INSTITUTION</th><th>APPLICATION TYPE</th><th>ACADEMIC YEAR</th><th>CYCLE</th><th>ASSIGNED OFFICER</th><th>STATUS</th><th></th></tr></thead><tbody>
-  {apps.map(a=><tr key={a.id}><td><div className="inst"><span className="inst-icon"><Building2 size={17}/></span><span><strong>{a.institution_name}</strong><small>{a.institution_code||`Application #${a.id}`}</small></span></div></td><td>{a.application_type}</td><td>{a.academic_year}</td><td><span className="count-pill">v{a.submission_version||1}</span></td><td>{a.assigned_officer_id?<span style={{fontSize:'10px',color:'#3a4d70'}}><UserCheck size={13}/> Officer #{a.assigned_officer_id}</span>:<span style={{fontSize:'10px',color:'#97a1b2'}}>Unassigned</span>}</td><td><Status value={a.status}/></td><td><div style={{display:'flex',gap:'6px',alignItems:'center',justifyContent:'flex-end'}}><button className="row-link" onClick={()=>openApp(a)}>Review <ArrowUpRight size={15}/></button>{isInstitution&&a.status==='DRAFT'&&<button className="row-link" onClick={(e)=>{e.stopPropagation();deleteDraft(a.id)}} title="Delete draft application" style={{color:'#c04848'}}><Trash2 size={14}/></button>}</div></td></tr>)}
+  {apps.map(a=><tr key={a.id}><td><div className="inst"><span className="inst-icon"><Building2 size={17}/></span><span><strong>{a.institution_name}</strong><small>{a.institution_code||`Application #${a.id}`}</small></span></div></td><td>{a.application_type}</td><td>{a.academic_year}</td><td><span className="count-pill">v{a.submission_version||1}</span></td><td>{a.assigned_officer_name?<span style={{fontSize:'10px',color:'#3a4d70'}}><UserCheck size={13}/> {a.assigned_officer_name}</span>:a.assigned_officer_id?<span style={{fontSize:'10px',color:'#3a4d70'}}><UserCheck size={13}/> Officer #{a.assigned_officer_id}</span>:<span style={{fontSize:'10px',color:'#97a1b2'}}>Unassigned</span>}</td><td><Status value={a.status}/></td><td><div style={{display:'flex',gap:'6px',alignItems:'center',justifyContent:'flex-end'}}><button className="row-link" onClick={()=>openApp(a)}>Review <ArrowUpRight size={15}/></button>{isInstitution&&a.status==='DRAFT'&&<button className="row-link" onClick={(e)=>{e.stopPropagation();deleteDraft(a.id)}} title="Delete draft application" style={{color:'#c04848'}}><Trash2 size={14}/></button>}</div></td></tr>)}
   </tbody></table></div>}
   </section>
 
@@ -267,8 +308,44 @@ function App(){
 
   {/* --- Application Detail --- */}
   {selected&&<>
-  <div className="detail-grid"><section className="panel"><div className="panel-heading"><div><h2>Application details</h2><p>Institution-submitted information</p></div><div style={{display:'flex',gap:'8px',alignItems:'center'}}>{isOfficerOrAdmin&&!detail?.application?.assigned_officer_id&&<button className="secondary" onClick={claimApp}><UserCheck size={14}/> Claim assignment</button>}<Status value={currentStatus}/></div></div><div className="detail-fields"><Field label="Institution code" value={detail?.application?.institution_code||'Not provided'}/><Field label="Application type" value={detail?.application?.application_type}/><Field label="Academic year" value={detail?.application?.academic_year}/><Field label="Submission Version" value={`Cycle v${detail?.application?.submission_version||1}`}/><Field label="Assigned Officer" value={detail?.application?.assigned_officer_id?`Officer #${detail.application.assigned_officer_id}`:'Unassigned'}/><Field label="Programme / course" value={detail?.application?.programme||'Not provided'}/><Field label="Current intake" value={detail?.application?.current_intake??'Not provided'}/><Field label="Proposed intake" value={detail?.application?.proposed_intake??'Not provided'}/></div></section>
+  <div className="detail-grid"><section className="panel"><div className="panel-heading"><div><h2>Application details</h2><p>Institution-submitted information</p></div><div style={{display:'flex',gap:'8px',alignItems:'center'}}>{isOfficer&&isUnassignedOfficer&&currentStatus!=='DRAFT'&&<button className="secondary" onClick={claimApp} disabled={busy} title="Claim assignment as reviewing officer"><UserCheck size={14}/> Claim assignment</button>}{isOfficer&&isAssignedOfficer&&<button className="secondary" onClick={releaseApp} disabled={busy} title="Release assignment back to triage queue"><UserX size={14}/> Release assignment</button>}<Status value={currentStatus}/></div></div><div className="detail-fields"><Field label="Institution code" value={detail?.application?.institution_code||'Not provided'}/><Field label="Application type" value={detail?.application?.application_type}/><Field label="Academic year" value={detail?.application?.academic_year}/><Field label="Submission Version" value={`Cycle v${detail?.application?.submission_version||1}`}/><Field label="Assigned Officer" value={assignedOfficerName?`${assignedOfficerName} (Officer #${assignedOfficerId})`:assignedOfficerId?`Officer #${assignedOfficerId}`:'Unassigned (Triage Queue)'}/><Field label="Programme / course" value={detail?.application?.programme||'Not provided'}/><Field label="Current intake" value={detail?.application?.current_intake??'Not provided'}/><Field label="Proposed intake" value={detail?.application?.proposed_intake??'Not provided'}/></div></section>
   <section className="panel risk-panel"><div className="eyebrow">SCREENING TRIAGE</div><div className="risk-number">{detail?.risk_score??'—'}<small>/100</small></div><div className="risk-label">Heuristic review score</div><div className="risk-track"><span style={{width:`${detail?.risk_score||0}%`}}/></div><p>Not a probability of fraud and not an approval decision. Scores prioritize manual review only.</p><div className="manual-flag"><AlertTriangle size={17}/> Issuer verification not configured</div></section></div>
+
+  {/* --- Regulatory Pre-Screening & Compliance Limitations (Officer & Admin) --- */}
+  {isOfficerOrAdmin && (
+    <section className="panel" style={{borderLeft:'4px solid #3b82f6',background:'#f9fbff'}}>
+      <div className="panel-heading" style={{borderBottom:'1px solid #e5edf9',padding:'14px 20px'}}>
+        <div>
+          <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
+            <ShieldCheck size={16} color="#2563eb"/>
+            <strong style={{color:'#1e40af',fontSize:'13px'}}>Regulatory Pre-Screening & Compliance Limitations</strong>
+          </div>
+          <p style={{fontSize:'10px',color:'#475569',marginTop:'2px'}}>
+            Compliance boundaries and regulatory limitations for reviewing officers and administrators.
+          </p>
+        </div>
+        <span className="count-pill" style={{background:'#dbeafe',color:'#1e40af',fontWeight:700}}>PRE-SCREENING ONLY</span>
+      </div>
+      <div style={{padding:'12px 20px',fontSize:'11px',color:'#334155',display:'grid',gridTemplateColumns:'repeat(auto-fit, minmax(260px, 1fr))',gap:'14px'}}>
+        <div>
+          <div style={{fontWeight:700,color:'#0f172a',marginBottom:'3px',display:'flex',alignItems:'center',gap:'5px'}}>
+            <AlertTriangle size={13} color="#d97706"/> Automated Decision Support
+          </div>
+          <span style={{color:'#64748b',lineHeight:'1.5'}}>
+            OCR text extraction, heuristic triage scores, and SHA-256 duplicate detection assist manual scrutiny. They <strong>do not prove document authenticity</strong> or legal validity.
+          </span>
+        </div>
+        <div>
+          <div style={{fontWeight:700,color:'#0f172a',marginBottom:'3px',display:'flex',alignItems:'center',gap:'5px'}}>
+            <AlertTriangle size={13} color="#d97706"/> Live AICTE Integration: Not Configured
+          </div>
+          <span style={{color:'#64748b',lineHeight:'1.5'}}>
+            No live AICTE central API or issuer verification service is connected. Final compliance determinations require human scrutiny by an authorized regulatory officer.
+          </span>
+        </div>
+      </div>
+    </section>
+  )}
 
   {/* --- Institution: Deficiency Notice & Instructions --- */}
   {isInstitution&&currentStatus==='DEFICIENCY_RAISED'&&activeDeficiency&&(
@@ -346,42 +423,212 @@ function App(){
   {/* --- Institution: Submit Rectification --- */}
   {isInstitution&&currentStatus==='DEFICIENCY_RAISED'&&<section className="panel"><div className="panel-heading"><div><h2>Respond to deficiency</h2><p>Upload corrected documents above, then submit your rectification cycle.</p></div></div><div className="action-row"><button className="primary" onClick={()=>changeStatus('RECTIFICATION_SUBMITTED')}>Submit rectification cycle <ArrowUpRight size={16}/></button></div></section>}
 
-  {/* --- Officer Actions --- */}
-  {isOfficerOrAdmin&&<section className="panel"><div className="panel-heading"><div><h2>Officer actions</h2><p>{isAssignedOfficer?'Workflow transitions are logged. This does not grant AICTE approval.':'Read-only mode. Claim assignment to record reviews or change application status.'}</p></div></div><div className="action-row">
-  {isAssignedOfficer&&<>
-    {currentStatus==='DRAFT'&&<button className="secondary" onClick={()=>changeStatus('UNDER_REVIEW')}>Start review</button>}
-    {currentStatus==='RECTIFICATION_SUBMITTED'&&<button className="secondary" onClick={()=>changeStatus('UNDER_REVIEW')}>Resume review</button>}
-    {(currentStatus==='UNDER_REVIEW'||currentStatus==='RECTIFICATION_SUBMITTED')&&<button className="secondary warning-btn" onClick={()=>changeStatus('DEFICIENCY_RAISED')}>Raise deficiency</button>}
-    {(currentStatus==='UNDER_REVIEW'||currentStatus==='RECTIFICATION_SUBMITTED')&&<button className="primary" onClick={()=>changeStatus('OFFICER_RECOMMENDATION_RECORDED')}>Record recommendation</button>}
-    {currentStatus==='OFFICER_RECOMMENDATION_RECORDED'&&<button className="secondary" onClick={()=>changeStatus('CLOSED')}>Close workflow</button>}
-    {(currentStatus==='UNDER_REVIEW'||currentStatus==='DEFICIENCY_RAISED')&&<button className="secondary" onClick={()=>changeStatus('CLOSED')}>Close workflow</button>}
-  </>}
-  </div></section>}
+  {/* --- Admin: Administrative Oversight & Officer Assignment --- */}
+  {isAdmin && (
+    <section className="panel">
+      <div className="panel-heading">
+        <div>
+          <h2>Administrative oversight & officer assignment</h2>
+          <p>Assign reviewing officers to applications and administer workflow governance.</p>
+        </div>
+        <span className="count-pill" style={{background:'#eef2f7',color:'#334155'}}>Admin Governance</span>
+      </div>
+      <div style={{padding:'16px 20px',display:'grid',gap:'16px'}}>
+        <div style={{display:'flex',flexWrap:'wrap',alignItems:'center',gap:'12px',background:'#f8fafc',padding:'14px 16px',borderRadius:'8px',border:'1px solid #e2e8f0'}}>
+          <div style={{minWidth:'200px'}}>
+            <span style={{fontSize:'10px',color:'#64748b',textTransform:'uppercase',fontWeight:700,display:'block',marginBottom:'3px'}}>
+              Assigned Compliance Officer
+            </span>
+            <strong style={{fontSize:'13px',color:'#0f172a'}}>
+              {assignedOfficerName ? `${assignedOfficerName} (Officer #${assignedOfficerId})` : assignedOfficerId ? `Officer #${assignedOfficerId}` : 'Unassigned (In Triage Queue)'}
+            </strong>
+          </div>
+          <div style={{display:'flex',alignItems:'center',gap:'8px',flexWrap:'wrap',marginLeft:'auto'}}>
+            <select
+              value={selectedAssignee}
+              onChange={e=>setSelectedAssignee(e.target.value)}
+              disabled={busy || currentStatus === 'DRAFT'}
+              style={{height:'36px',border:'1px solid #cbd5e1',borderRadius:'6px',padding:'0 10px',fontSize:'11px',background:'#fff'}}
+            >
+              <option value="">-- Select Officer --</option>
+              {officersList.map(o=>(
+                <option key={o.id} value={o.id}>{o.name} ({o.email})</option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="secondary"
+              onClick={()=>adminAssignOfficer(selectedAssignee)}
+              disabled={busy || !selectedAssignee || Number(selectedAssignee) === assignedOfficerId || currentStatus === 'DRAFT'}
+              title={currentStatus === 'DRAFT' ? "Draft applications cannot be assigned before institutional submission" : "Assign selected officer"}
+            >
+              <UserCheck size={14}/> {assignedOfficerId ? 'Reassign officer' : 'Assign officer'}
+            </button>
+            {assignedOfficerId && (
+              <button
+                type="button"
+                className="secondary"
+                onClick={()=>adminAssignOfficer(null)}
+                disabled={busy || currentStatus === 'DRAFT'}
+                style={{color:'#991b1b',borderColor:'#fecaca',background:'#fff5f5'}}
+                title="Unassign officer and return application to triage queue"
+              >
+                <UserX size={14}/> Unassign
+              </button>
+            )}
+          </div>
+        </div>
+        {currentStatus === 'DRAFT' && (
+          <div style={{fontSize:'11px',color:'#64748b',fontStyle:'italic'}}>
+            ℹ️ Draft application — institutional submission required before officer assignment.
+          </div>
+        )}
+
+        <div style={{display:'flex',flexWrap:'wrap',alignItems:'center',justifyContent:'space-between',gap:'10px',borderTop:'1px solid #e2e8f0',paddingTop:'12px'}}>
+          <div>
+            <strong style={{fontSize:'12px',color:'#1e293b'}}>Administrative Workflow Control</strong>
+            <p style={{fontSize:'11px',color:'#64748b',margin:'2px 0 0 0'}}>
+              Administrators manage lifecycle status when regulatory intervention or administrative closure is needed.
+            </p>
+          </div>
+          <div style={{display:'flex',gap:'8px',alignItems:'center'}}>
+            {currentStatus !== 'CLOSED' && currentStatus !== 'DRAFT' && (
+              <button
+                type="button"
+                className="secondary"
+                onClick={()=>{
+                  const ok = window.confirm("Administratively close this application workflow?");
+                  if(ok) changeStatus('CLOSED');
+                }}
+                disabled={busy}
+                style={{color:'#475569'}}
+              >
+                Close workflow (Admin override)
+              </button>
+            )}
+            {currentStatus === 'CLOSED' && (
+              <span style={{fontSize:'11px',color:'#64748b',fontWeight:600}}>
+                Workflow closed
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+    </section>
+  )}
+
+  {/* --- Officer: Officer Review Actions --- */}
+  {isOfficer && (
+    <section className="panel">
+      <div className="panel-heading">
+        <div>
+          <h2>Officer review actions</h2>
+          <p>
+            {isAssignedOfficer
+              ? 'Workflow transitions are logged and audit-trailed. This does not grant final AICTE approval.'
+              : isUnassignedOfficer
+                ? 'Application is currently unassigned. Claim assignment to perform review actions.'
+                : `Application is currently assigned to ${assignedOfficerName || `Officer #${assignedOfficerId}`}. Read-only view.`
+            }
+          </p>
+        </div>
+        {isAssignedOfficer && <span className="count-pill" style={{background:'#e0f2fe',color:'#0369a1'}}>Assigned Reviewer</span>}
+        {isUnassignedOfficer && (
+          <button className="primary" onClick={claimApp} disabled={busy || currentStatus === 'DRAFT'}>
+            <UserCheck size={14}/> Claim assignment
+          </button>
+        )}
+      </div>
+      {isAssignedOfficer ? (
+        <div className="action-row">
+          {currentStatus==='RECTIFICATION_SUBMITTED'&&<button className="secondary" onClick={()=>changeStatus('UNDER_REVIEW')} disabled={busy}>Resume review</button>}
+          {(currentStatus==='UNDER_REVIEW'||currentStatus==='RECTIFICATION_SUBMITTED')&&<button className="secondary warning-btn" onClick={()=>changeStatus('DEFICIENCY_RAISED')} disabled={busy}>Raise deficiency</button>}
+          {(currentStatus==='UNDER_REVIEW'||currentStatus==='RECTIFICATION_SUBMITTED')&&<button className="primary" onClick={()=>changeStatus('OFFICER_RECOMMENDATION_RECORDED')} disabled={busy}>Record recommendation</button>}
+          {(['UNDER_REVIEW','DEFICIENCY_RAISED','OFFICER_RECOMMENDATION_RECORDED'].includes(currentStatus))&&<button className="secondary" onClick={()=>changeStatus('CLOSED')} disabled={busy}>Close workflow</button>}
+        </div>
+      ) : (
+        <div style={{padding:'14px 20px',fontSize:'12px',color:'#64748b',background:'#f8fafc'}}>
+          {isUnassignedOfficer ? (
+            <div style={{display:'flex',alignItems:'center',gap:'8px'}}>
+              <AlertTriangle size={15} color="#eab308"/>
+              <span>This application is in the triage queue. <strong>Claim assignment</strong> above to update status, record observations, or request rectifications.</span>
+            </div>
+          ) : (
+            <div style={{display:'flex',alignItems:'center',gap:'8px'}}>
+              <LockKeyhole size={15} color="#94a3b8"/>
+              <span>Assigned to {assignedOfficerName || `Officer #${assignedOfficerId}`}. Only the assigned officer may advance workflow status or raise deficiencies.</span>
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  )}
 
   {/* --- Officer Review Notes & Deficiency Form --- */}
-  {isOfficerOrAdmin&&<section className="panel"><div className="panel-heading"><div><h2>Review observations & deficiency instructions</h2><p>Record observations, cite deficient findings, and specify correction instructions.</p></div></div>
-  {isAssignedOfficer?<div style={{padding:'15px 20px'}}>
-  <div style={{display:'flex',gap:'10px',marginBottom:'10px'}}>
-  <select value={reviewAction} onChange={e=>setReviewAction(e.target.value)} style={{height:'39px',border:'1px solid #e0e5ef',borderRadius:'8px',padding:'0 12px',fontSize:'11px',background:'#fff'}}>
-  <option value="REVIEW_NOTE">Review Note</option>
-  <option value="DEFICIENCY_REQUEST">Deficiency Request</option>
-  <option value="CORRECTION_ACCEPTED">Correction Accepted</option>
-  <option value="RECOMMENDATION">Recommendation</option>
-  </select>
-  <button className="primary" onClick={submitReview} disabled={busy||!reviewNote.trim()}>Submit observation <ArrowUpRight size={15}/></button>
-  </div>
-  <textarea value={reviewNote} onChange={e=>setReviewNote(e.target.value)} placeholder="Enter your review observations and findings notes..." rows={3} style={{width:'100%',border:'1px solid #e0e5ef',borderRadius:'8px',padding:'10px 12px',fontSize:'11px',fontFamily:'inherit',resize:'vertical',marginBottom:'10px'}}/>
-  {reviewAction==='DEFICIENCY_REQUEST'&&<div style={{display:'grid',gap:'8px',marginBottom:'10px'}}>
-    <input value={findingRef} onChange={e=>setFindingRef(e.target.value)} placeholder="Referenced finding IDs (comma-separated, e.g. DOC-001, DOC-003)" style={{height:'37px',border:'1px solid #e0e5ef',borderRadius:'8px',padding:'0 12px',fontSize:'11px'}}/>
-    <textarea value={correctionInstructions} onChange={e=>setCorrectionInstructions(e.target.value)} placeholder="Specific correction instructions for the institution (e.g. Upload notarized land lease agreement and revised faculty list)..." rows={2} style={{width:'100%',border:'1px solid #e0e5ef',borderRadius:'8px',padding:'8px 12px',fontSize:'11px',fontFamily:'inherit',resize:'vertical'}}/>
-  </div>}
-  </div>:<div style={{padding:'15px 20px',fontSize:'11px',color:'#8490a6'}}>Only the assigned compliance officer may record observations or deficiency requests.</div>}
-  {/* Review history */}
-  {detail?.reviews?.length>0&&<div className="doc-list">{detail.reviews.map(r=><div className="doc-row" key={r.id}><div className="doc-icon" style={{background:r.action==='DEFICIENCY_REQUEST'?'#fff0e8':r.action==='RECOMMENDATION'?'#eaf8f0':'#f0f2ff',color:r.action==='DEFICIENCY_REQUEST'?'#b55c2c':r.action==='RECOMMENDATION'?'#26845a':'#6573f4'}}><MessageSquare size={17}/></div><div className="doc-info"><strong>{r.action.replaceAll('_',' ')}</strong><small>{r.notes}</small>{r.correction_instructions&&<small style={{color:'#b55c2c',marginTop:'2px'}}><strong>Instructions: </strong>{r.correction_instructions}</small>}{r.finding_references?.length>0&&<small style={{color:'#6876ee',marginTop:'2px'}}><strong>Cited findings: </strong>{r.finding_references.join(', ')}</small>}<small style={{color:'#98a2b3',marginTop:'4px'}}>{r.created_at?new Date(r.created_at).toLocaleString():''} · Officer #{r.officer_id}</small></div></div>)}</div>}
-  </section>}
+  {isOfficerOrAdmin && (
+    <section className="panel">
+      <div className="panel-heading">
+        <div>
+          <h2>{isAdmin ? 'Officer review observations history' : 'Review observations & deficiency instructions'}</h2>
+          <p>
+            {isAdmin
+              ? 'Compliance observations, deficiency notices, and recommendations recorded by assigned officers.'
+              : 'Record observations, cite deficient findings, and specify correction instructions.'}
+          </p>
+        </div>
+        {isAdmin && <span className="count-pill">Oversight View</span>}
+      </div>
+
+      {isAssignedOfficer && (
+        <div style={{padding:'15px 20px'}}>
+          <div style={{display:'flex',gap:'10px',marginBottom:'10px'}}>
+            <select value={reviewAction} onChange={e=>setReviewAction(e.target.value)} style={{height:'39px',border:'1px solid #e0e5ef',borderRadius:'8px',padding:'0 12px',fontSize:'11px',background:'#fff'}}>
+              <option value="REVIEW_NOTE">Review Note</option>
+              <option value="DEFICIENCY_REQUEST">Deficiency Request</option>
+              <option value="CORRECTION_ACCEPTED">Correction Accepted</option>
+              <option value="RECOMMENDATION">Recommendation</option>
+            </select>
+            <button className="primary" onClick={submitReview} disabled={busy||!reviewNote.trim()}>Submit observation <ArrowUpRight size={15}/></button>
+          </div>
+          <textarea value={reviewNote} onChange={e=>setReviewNote(e.target.value)} placeholder="Enter your review observations and findings notes..." rows={3} style={{width:'100%',border:'1px solid #e0e5ef',borderRadius:'8px',padding:'10px 12px',fontSize:'11px',fontFamily:'inherit',resize:'vertical',marginBottom:'10px'}}/>
+          {reviewAction==='DEFICIENCY_REQUEST'&&<div style={{display:'grid',gap:'8px',marginBottom:'10px'}}>
+            <input value={findingRef} onChange={e=>setFindingRef(e.target.value)} placeholder="Referenced finding IDs (comma-separated, e.g. DOC-001, DOC-003)" style={{height:'37px',border:'1px solid #e0e5ef',borderRadius:'8px',padding:'0 12px',fontSize:'11px'}}/>
+            <textarea value={correctionInstructions} onChange={e=>setCorrectionInstructions(e.target.value)} placeholder="Specific correction instructions for the institution (e.g. Upload notarized land lease agreement and revised faculty list)..." rows={2} style={{width:'100%',border:'1px solid #e0e5ef',borderRadius:'8px',padding:'8px 12px',fontSize:'11px',fontFamily:'inherit',resize:'vertical'}}/>
+          </div>}
+        </div>
+      )}
+
+      {isOfficer && !isAssignedOfficer && (
+        <div style={{padding:'14px 20px',fontSize:'11px',color:'#8490a6',background:'#f8fafc',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+          <span>
+            {isUnassignedOfficer
+              ? 'Application is unassigned. Claim assignment to record compliance review observations or deficiency notices.'
+              : `Only the assigned compliance officer (${assignedOfficerName || `Officer #${assignedOfficerId}`}) may record observations or deficiency requests.`}
+          </span>
+          {isUnassignedOfficer && (
+            <button className="secondary" onClick={claimApp} disabled={busy || currentStatus === 'DRAFT'}>
+              <UserCheck size={13}/> Claim assignment
+            </button>
+          )}
+        </div>
+      )}
+
+      {isAdmin && (
+        <div style={{padding:'12px 20px',fontSize:'11px',color:'#64748b',background:'#f8fafc',borderBottom:'1px solid #edf0f6'}}>
+          ℹ️ Compliance observations and deficiency notices are recorded by assigned compliance officers during scrutiny. Administrators provide governance and assignment oversight.
+        </div>
+      )}
+
+      {/* Review history */}
+      {detail?.reviews?.length>0&&<div className="doc-list">{detail.reviews.map(r=><div className="doc-row" key={r.id}><div className="doc-icon" style={{background:r.action==='DEFICIENCY_REQUEST'||r.action==='DEFICIENCY_RAISED'?'#fff0e8':r.action==='RECOMMENDATION'?'#eaf8f0':'#f0f2ff',color:r.action==='DEFICIENCY_REQUEST'||r.action==='DEFICIENCY_RAISED'?'#b55c2c':r.action==='RECOMMENDATION'?'#26845a':'#6573f4'}}><MessageSquare size={17}/></div><div className="doc-info"><strong>{r.action.replaceAll('_',' ')}</strong><small>{r.notes}</small>{r.correction_instructions&&<small style={{color:'#b55c2c',marginTop:'2px'}}><strong>Instructions: </strong>{r.correction_instructions}</small>}{r.finding_references?.length>0&&<small style={{color:'#6876ee',marginTop:'2px'}}><strong>Cited findings: </strong>{r.finding_references.join(', ')}</small>}<small style={{color:'#98a2b3',marginTop:'4px'}}>{r.created_at?new Date(r.created_at).toLocaleString():''} · Officer #{r.officer_id}</small></div></div>)}</div>}
+      {(!detail?.reviews || detail.reviews.length===0) && (
+        <div style={{padding:'20px',textAlign:'center',fontSize:'11px',color:'#94a3b8'}}>No review observations recorded yet.</div>
+      )}
+    </section>
+  )}
 
   {/* --- Deficiency Memo --- */}
-  {isOfficerOrAdmin&&<section className="panel"><div className="panel-heading"><div><h2>Deficiency memo assistant</h2><p>Optional Gemini-generated draft based only on current findings.</p></div>{isAssignedOfficer&&<button className="secondary" onClick={generateMemo}>Generate draft</button>}</div>{memo?<pre className="memo">{memo}</pre>:<div className="memo-placeholder">AI output is a draft only. Configure GEMINI_API_KEY on the backend to enable it; otherwise the app explains why it is unavailable.</div>}</section>}
+  {isOfficerOrAdmin&&<section className="panel"><div className="panel-heading"><div><h2>Deficiency memo assistant</h2><p>Optional Gemini-generated draft based only on current findings.</p></div>{(isAssignedOfficer||isAdmin)&&<button className="secondary" onClick={generateMemo} disabled={busy}>Generate draft</button>}</div>{memo?<pre className="memo">{memo}</pre>:<div className="memo-placeholder">AI output is a draft only. Configure GEMINI_API_KEY on the backend to enable it; otherwise the app explains why it is unavailable.</div>}</section>}
 
   {/* Institution can view reviews/history read-only */}
   {isInstitution&&detail?.reviews?.length>0&&<section className="panel"><div className="panel-heading"><div><h2>Officer review history</h2><p>Review decisions and notes from compliance officers.</p></div><span className="count-pill">{detail.reviews.length} entries</span></div>

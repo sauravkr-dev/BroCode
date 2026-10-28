@@ -994,3 +994,268 @@ class TestRemoveAndReplaceDocument:
             unlinked_now = safe_unlink_stored_file(db, stored_name, excluding_doc_ids=[doc_id])
             assert unlinked_now is True
             assert not file_path.exists()
+
+
+# ===========================================================================
+# 11. Role-Specific Officer and Admin Permissions & Governance
+# ===========================================================================
+class TestRoleSpecificOfficerAndAdminPermissions:
+    def test_list_officers_endpoint_permissions(self):
+        admin_token = login_token("admin@example.com", "DemoAdmin123!")
+        off_token = login_token("officer@example.com", "DemoOfficer123!")
+        inst_token = login_token("institution@example.com", "DemoInstitution123!")
+
+        # Admin can list active officers
+        admin_res = client.get("/api/officers", headers={"Authorization": f"Bearer {admin_token}"})
+        assert admin_res.status_code == 200
+        officers = admin_res.json()
+        assert isinstance(officers, list)
+        assert len(officers) >= 1
+        assert any(o["email"] == "officer@example.com" for o in officers)
+        assert all("id" in o and "name" in o and "email" in o for o in officers)
+
+        # Officer can list active officers
+        off_res = client.get("/api/officers", headers={"Authorization": f"Bearer {off_token}"})
+        assert off_res.status_code == 200
+        assert len(off_res.json()) >= 1
+
+        # Institution CANNOT list officers
+        inst_res = client.get("/api/officers", headers={"Authorization": f"Bearer {inst_token}"})
+        assert inst_res.status_code == 403
+
+    def test_admin_assignment_governance(self):
+        admin_token = login_token("admin@example.com", "DemoAdmin123!")
+        inst_token = login_token("institution@example.com", "DemoInstitution123!")
+        off_token = login_token("officer@example.com", "DemoOfficer123!")
+        off_id = client.get("/api/auth/me", headers={"Authorization": f"Bearer {off_token}"}).json()["id"]
+
+        # 1. Institution creates application
+        app_res = client.post(
+            "/api/applications",
+            json={"institution_name": "Admin Governance College", "academic_year": "2026-27"},
+            headers={"Authorization": f"Bearer {inst_token}"},
+        )
+        app_id = app_res.json()["id"]
+
+        # 2. Cannot assign draft application -> 409
+        assign_draft = client.patch(
+            f"/api/applications/{app_id}/assign",
+            json={"officer_id": off_id},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert assign_draft.status_code == 409
+
+        # Submit application
+        client.patch(
+            f"/api/applications/{app_id}/status",
+            json={"status": "UNDER_REVIEW"},
+            headers={"Authorization": f"Bearer {inst_token}"},
+        )
+
+        # 3. Admin cannot assign invalid/non-officer user
+        inst_id = client.get("/api/auth/me", headers={"Authorization": f"Bearer {inst_token}"}).json()["id"]
+        bad_assign = client.patch(
+            f"/api/applications/{app_id}/assign",
+            json={"officer_id": inst_id},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert bad_assign.status_code == 400
+
+        # 4. Admin assigns active officer -> 200 with officer name
+        good_assign = client.patch(
+            f"/api/applications/{app_id}/assign",
+            json={"officer_id": off_id},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert good_assign.status_code == 200
+        assert good_assign.json()["assigned_officer_id"] == off_id
+        assert good_assign.json()["assigned_officer_name"] is not None
+
+        # 5. Detail reflects assigned officer name
+        detail = client.get(f"/api/applications/{app_id}", headers={"Authorization": f"Bearer {admin_token}"}).json()
+        assert detail["application"]["assigned_officer_id"] == off_id
+        assert detail["application"]["assigned_officer_name"] == good_assign.json()["assigned_officer_name"]
+
+        # 6. Admin unassigns application -> 200 with None
+        unassign = client.patch(
+            f"/api/applications/{app_id}/assign",
+            json={"officer_id": None},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert unassign.status_code == 200
+        assert unassign.json()["assigned_officer_id"] is None
+        assert unassign.json()["assigned_officer_name"] is None
+
+    def test_officer_claim_and_release_lifecycle(self):
+        admin_token = login_token("admin@example.com", "DemoAdmin123!")
+        inst_token = login_token("institution@example.com", "DemoInstitution123!")
+        off1_token = login_token("officer@example.com", "DemoOfficer123!")
+        off1_id = client.get("/api/auth/me", headers={"Authorization": f"Bearer {off1_token}"}).json()["id"]
+
+        # Ensure officer2 exists
+        client.post(
+            "/api/admin/users",
+            json={"email": "officer2@example.com", "name": "Officer Two", "password": "Password123!", "role": "officer"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        off2_token = login_token("officer2@example.com", "Password123!")
+        off2_id = client.get("/api/auth/me", headers={"Authorization": f"Bearer {off2_token}"}).json()["id"]
+
+        app_res = client.post(
+            "/api/applications",
+            json={"institution_name": "Claim Release Academy", "academic_year": "2026-27"},
+            headers={"Authorization": f"Bearer {inst_token}"},
+        )
+        app_id = app_res.json()["id"]
+
+        client.patch(
+            f"/api/applications/{app_id}/status",
+            json={"status": "UNDER_REVIEW"},
+            headers={"Authorization": f"Bearer {inst_token}"},
+        )
+
+        # Officer 1 claims application
+        claim1 = client.patch(
+            f"/api/applications/{app_id}/assign",
+            json={"officer_id": off1_id},
+            headers={"Authorization": f"Bearer {off1_token}"},
+        )
+        assert claim1.status_code == 200
+        assert claim1.json()["assigned_officer_id"] == off1_id
+
+        # Officer 1 cannot assign another officer
+        assign_other = client.patch(
+            f"/api/applications/{app_id}/assign",
+            json={"officer_id": off2_id},
+            headers={"Authorization": f"Bearer {off1_token}"},
+        )
+        assert assign_other.status_code == 403
+
+        # Officer 1 releases assignment
+        release1 = client.patch(
+            f"/api/applications/{app_id}/assign",
+            json={"officer_id": None},
+            headers={"Authorization": f"Bearer {off1_token}"},
+        )
+        assert release1.status_code == 200
+        assert release1.json()["assigned_officer_id"] is None
+
+        # Now Officer 2 can claim it
+        claim2 = client.patch(
+            f"/api/applications/{app_id}/assign",
+            json={"officer_id": off2_id},
+            headers={"Authorization": f"Bearer {off2_token}"},
+        )
+        assert claim2.status_code == 200
+        assert claim2.json()["assigned_officer_id"] == off2_id
+
+    def test_unassigned_officer_restrictions(self):
+        inst_token = login_token("institution@example.com", "DemoInstitution123!")
+        off_token = login_token("officer@example.com", "DemoOfficer123!")
+
+        app_res = client.post(
+            "/api/applications",
+            json={"institution_name": "Unassigned Restriction College", "academic_year": "2026-27"},
+            headers={"Authorization": f"Bearer {inst_token}"},
+        )
+        app_id = app_res.json()["id"]
+
+        client.patch(
+            f"/api/applications/{app_id}/status",
+            json={"status": "UNDER_REVIEW"},
+            headers={"Authorization": f"Bearer {inst_token}"},
+        )
+
+        # Unassigned officer CANNOT update status
+        st_res = client.patch(
+            f"/api/applications/{app_id}/status",
+            json={"status": "DEFICIENCY_RAISED"},
+            headers={"Authorization": f"Bearer {off_token}"},
+        )
+        assert st_res.status_code == 403
+
+        # Unassigned officer CANNOT create review
+        rev_res = client.post(
+            f"/api/applications/{app_id}/reviews",
+            json={"action": "REVIEW_NOTE", "notes": "Premature unassigned review"},
+            headers={"Authorization": f"Bearer {off_token}"},
+        )
+        assert rev_res.status_code == 403
+
+        # Unassigned officer CANNOT upload evidence
+        png = make_valid_png()
+        ev_res = client.post(
+            f"/api/applications/{app_id}/officer-evidence",
+            files={"file": ("evidence.png", png, "image/png")},
+            headers={"Authorization": f"Bearer {off_token}"},
+        )
+        assert ev_res.status_code == 403
+
+        # Unassigned officer CANNOT generate memo
+        memo_res = client.post(
+            f"/api/applications/{app_id}/memo",
+            headers={"Authorization": f"Bearer {off_token}"},
+        )
+        assert memo_res.status_code == 403
+
+    def test_admin_administrative_workflow_closure(self):
+        admin_token = login_token("admin@example.com", "DemoAdmin123!")
+        inst_token = login_token("institution@example.com", "DemoInstitution123!")
+
+        app_res = client.post(
+            "/api/applications",
+            json={"institution_name": "Admin Workflow Close College", "academic_year": "2026-27"},
+            headers={"Authorization": f"Bearer {inst_token}"},
+        )
+        app_id = app_res.json()["id"]
+
+        client.patch(
+            f"/api/applications/{app_id}/status",
+            json={"status": "UNDER_REVIEW"},
+            headers={"Authorization": f"Bearer {inst_token}"},
+        )
+
+        # Admin can administratively close the workflow
+        close_res = client.patch(
+            f"/api/applications/{app_id}/status",
+            json={"status": "CLOSED"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert close_res.status_code == 200
+        assert close_res.json()["status"] == "CLOSED"
+
+    def test_system_compliance_and_prescreening_metadata(self):
+        admin_token = login_token("admin@example.com", "DemoAdmin123!")
+        inst_token = login_token("institution@example.com", "DemoInstitution123!")
+
+        # Health endpoint transparency
+        h_res = client.get("/api/health")
+        assert h_res.status_code == 200
+        h_data = h_res.json()
+        assert h_data["mode"] == "pre-screening"
+        assert h_data["live_aicte_integration"] is False
+        assert h_data["officer_assignment_model"] == "assigned_officer_enforced"
+
+        # Application detail transparency
+        app_res = client.post(
+            "/api/applications",
+            json={"institution_name": "Metadata Check College", "academic_year": "2026-27"},
+            headers={"Authorization": f"Bearer {inst_token}"},
+        )
+        app_id = app_res.json()["id"]
+
+        client.patch(
+            f"/api/applications/{app_id}/status",
+            json={"status": "UNDER_REVIEW"},
+            headers={"Authorization": f"Bearer {inst_token}"},
+        )
+
+        detail_res = client.get(
+            f"/api/applications/{app_id}",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert detail_res.status_code == 200
+        d_data = detail_res.json()
+        assert d_data["live_issuer_verification"] == "NOT_CONFIGURED"
+        assert "Heuristic triage score" in d_data["risk_score_note"]
+

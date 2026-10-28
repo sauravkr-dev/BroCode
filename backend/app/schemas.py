@@ -51,6 +51,7 @@ class ApplicationOut(BaseModel):
     status: str
     owner_id: int
     assigned_officer_id: Optional[int] = None
+    assigned_officer_name: Optional[str] = None
     submission_version: int = 1
     model_config = ConfigDict(from_attributes=True)
 

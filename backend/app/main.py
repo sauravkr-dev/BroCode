@@ -256,6 +256,15 @@ def update_user(user_id: int, payload: UserUpdate, db: Session = Depends(get_db)
     return {"id": target.id, "email": target.email, "name": target.name, "role": target.role, "active": target.active}
 
 
+@app.get("/api/officers")
+def list_officers(db: Session = Depends(get_db), user: User = Depends(require_roles("officer", "admin"))):
+    """List all active officers for assignment purposes."""
+    rows = db.scalars(
+        select(User).where(User.role == "officer", User.active == True).order_by(User.name)
+    ).all()
+    return [{"id": u.id, "name": u.name, "email": u.email} for u in rows]
+
+
 # ---------------------------------------------------------------------------
 # Applications
 # ---------------------------------------------------------------------------
@@ -301,6 +310,12 @@ def list_applications(
         q = q.where(Application.status != "DRAFT")
 
     rows = db.scalars(q).all()
+    officer_ids = {a.assigned_officer_id for a in rows if a.assigned_officer_id}
+    officer_map = {}
+    if officer_ids:
+        officers = db.scalars(select(User).where(User.id.in_(officer_ids))).all()
+        officer_map = {o.id: o.name for o in officers}
+
     return [
         {
             "id": a.id,
@@ -313,6 +328,7 @@ def list_applications(
             "created_at": a.created_at.isoformat() if a.created_at else None,
             "owner_id": a.owner_id,
             "assigned_officer_id": a.assigned_officer_id,
+            "assigned_officer_name": officer_map.get(a.assigned_officer_id),
             "submission_version": getattr(a, "submission_version", 1),
         }
         for a in rows
@@ -403,8 +419,13 @@ def application_detail(app_id: int, db: Session = Depends(get_db), user: User = 
             "documents": [{"id": d.id, "name": d.original_name, "type": d.doc_type} for d in v_docs],
         })
 
+    assigned_officer = db.get(User, a.assigned_officer_id) if a.assigned_officer_id else None
+    app_data = ApplicationOut.model_validate(a).model_dump()
+    app_data["assigned_officer_name"] = assigned_officer.name if assigned_officer else None
+    app_data["assigned_officer_email"] = assigned_officer.email if assigned_officer else None
+
     return {
-        "application": ApplicationOut.model_validate(a).model_dump(),
+        "application": app_data,
         "documents": [
             {
                 "id": d.id,
@@ -479,7 +500,7 @@ def assign_application(
     else:  # Admin
         if payload.officer_id is not None:
             target_user = db.get(User, payload.officer_id)
-            if not target_user or target_user.role != "officer":
+            if not target_user or target_user.role != "officer" or not target_user.active:
                 raise HTTPException(400, "Assigned user must be an active officer")
         target_officer_id = payload.officer_id
 
@@ -490,7 +511,12 @@ def assign_application(
         {"from_officer_id": old_officer_id, "to_officer_id": target_officer_id},
     )
     db.commit()
-    return {"id": a.id, "assigned_officer_id": a.assigned_officer_id}
+    target_officer = db.get(User, target_officer_id) if target_officer_id else None
+    return {
+        "id": a.id,
+        "assigned_officer_id": a.assigned_officer_id,
+        "assigned_officer_name": target_officer.name if target_officer else None,
+    }
 
 
 # ---------------------------------------------------------------------------
