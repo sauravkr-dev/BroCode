@@ -649,12 +649,28 @@ class TestAdminAndAudit:
 # 9. Draft Application Visibility & Privacy
 # ===========================================================================
 class TestDraftVisibilityAndPrivacy:
-    def test_officer_cannot_view_or_act_on_drafts(self):
+    def test_draft_applications_visible_only_to_owning_institution(self):
+        """
+        Enforce strict draft privacy:
+        - Owning institution can see its own drafts in listing and detail.
+        - Other institutions CANNOT see the draft in listing or detail.
+        - Neither Officers nor Admins can see drafts in listing (even with ?include_drafts=true).
+        - Neither Officers nor Admins can access draft detail, download draft documents,
+          assign officers, review, or change status on drafts.
+        """
+        admin_token = login_token("admin@example.com", "DemoAdmin123!")
         inst_token = login_token("institution@example.com", "DemoInstitution123!")
         off_token = login_token("officer@example.com", "DemoOfficer123!")
-        admin_token = login_token("admin@example.com", "DemoAdmin123!")
 
-        # Institution creates draft application
+        # Ensure second institution exists
+        client.post(
+            "/api/admin/users",
+            json={"email": "inst2@example.com", "name": "Second Institution", "password": "Password123!", "role": "institution"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        inst2_token = login_token("inst2@example.com", "Password123!")
+
+        # 1. Institution creates draft application
         app_res = client.post(
             "/api/applications",
             json={"institution_name": "Private Draft Academy", "academic_year": "2026-27"},
@@ -664,7 +680,7 @@ class TestDraftVisibilityAndPrivacy:
         app_id = app_res.json()["id"]
         assert app_res.json()["status"] == "DRAFT"
 
-        # Institution uploads a document to draft
+        # 2. Institution uploads a document to draft
         pdf = make_valid_pdf("Draft syllabus content")
         up_res = client.post(
             f"/api/applications/{app_id}/documents",
@@ -674,57 +690,79 @@ class TestDraftVisibilityAndPrivacy:
         assert up_res.status_code == 200
         doc_id = up_res.json()["document_id"]
 
-        # 1. Officer listing applications MUST NOT contain the draft
+        # 3. Owner institution CAN view its own draft in listing and detail
+        owner_list = client.get("/api/applications", headers={"Authorization": f"Bearer {inst_token}"}).json()
+        assert any(a["id"] == app_id for a in owner_list)
+        owner_detail = client.get(f"/api/applications/{app_id}", headers={"Authorization": f"Bearer {inst_token}"})
+        assert owner_detail.status_code == 200
+        assert owner_detail.json()["application"]["status"] == "DRAFT"
+
+        # 4. Other institution (inst2) CANNOT see draft in listing, detail, or document download
+        inst2_list = client.get("/api/applications", headers={"Authorization": f"Bearer {inst2_token}"}).json()
+        assert not any(a["id"] == app_id for a in inst2_list)
+        inst2_detail = client.get(f"/api/applications/{app_id}", headers={"Authorization": f"Bearer {inst2_token}"})
+        assert inst2_detail.status_code == 404
+        inst2_dl = client.get(f"/api/applications/{app_id}/documents/{doc_id}/download", headers={"Authorization": f"Bearer {inst2_token}"})
+        assert inst2_dl.status_code in (403, 404)
+
+        # 5. Officer CANNOT see draft in listing, with or without query params
         off_list = client.get("/api/applications", headers={"Authorization": f"Bearer {off_token}"}).json()
         assert not any(a["id"] == app_id for a in off_list)
+        off_list_query = client.get("/api/applications?include_drafts=true", headers={"Authorization": f"Bearer {off_token}"}).json()
+        assert not any(a["id"] == app_id for a in off_list_query)
 
-        # 2. Officer detail query for draft MUST return 404
-        off_detail = client.get(f"/api/applications/{app_id}", headers={"Authorization": f"Bearer {off_token}"})
-        assert off_detail.status_code == 404
+        # 6. Officer detail, download, assign, review, evidence upload on draft MUST return 404/409
+        assert client.get(f"/api/applications/{app_id}", headers={"Authorization": f"Bearer {off_token}"}).status_code == 404
+        assert client.get(f"/api/applications/{app_id}/documents/{doc_id}/download", headers={"Authorization": f"Bearer {off_token}"}).status_code == 404
 
-        # 3. Officer document download for draft MUST return 404
-        off_dl = client.get(f"/api/applications/{app_id}/documents/{doc_id}/download", headers={"Authorization": f"Bearer {off_token}"})
-        assert off_dl.status_code == 404
-
-        # 4. Officer assign on draft MUST return 404
         off_info = client.get("/api/auth/me", headers={"Authorization": f"Bearer {off_token}"}).json()
-        off_assign = client.patch(
+        assert client.patch(
             f"/api/applications/{app_id}/assign",
             json={"officer_id": off_info["id"]},
             headers={"Authorization": f"Bearer {off_token}"},
-        )
-        assert off_assign.status_code in (404, 409)
+        ).status_code in (404, 409)
 
-        # 5. Officer review on draft MUST return 404
-        off_rev = client.post(
+        assert client.post(
             f"/api/applications/{app_id}/reviews",
             json={"action": "REVIEW_NOTE", "notes": "Premature review attempt"},
             headers={"Authorization": f"Bearer {off_token}"},
-        )
-        assert off_rev.status_code in (404, 409)
+        ).status_code in (404, 409)
 
-        # 6. Officer evidence upload on draft MUST return 404
-        off_ev = client.post(
+        assert client.post(
             f"/api/applications/{app_id}/officer-evidence",
             files={"file": ("ev.pdf", pdf, "application/pdf")},
             headers={"Authorization": f"Bearer {off_token}"},
-        )
-        assert off_ev.status_code in (404, 409)
+        ).status_code in (404, 409)
 
-        # 7. Admin queue: by default excludes drafts; includes drafts with include_drafts=true
-        admin_list_default = client.get("/api/applications", headers={"Authorization": f"Bearer {admin_token}"}).json()
-        assert not any(a["id"] == app_id for a in admin_list_default)
+        # 7. Admin CANNOT see draft in listing, with or without include_drafts query param
+        admin_list = client.get("/api/applications", headers={"Authorization": f"Bearer {admin_token}"}).json()
+        assert not any(a["id"] == app_id for a in admin_list)
 
         admin_list_oversight = client.get("/api/applications?include_drafts=true", headers={"Authorization": f"Bearer {admin_token}"}).json()
-        assert any(a["id"] == app_id for a in admin_list_oversight)
+        assert not any(a["id"] == app_id for a in admin_list_oversight)
 
-        # 8. Admin assigning draft returns 409 Conflict
-        admin_assign = client.patch(
+        # 8. Admin CANNOT access draft detail or download draft documents
+        assert client.get(f"/api/applications/{app_id}", headers={"Authorization": f"Bearer {admin_token}"}).status_code == 404
+        assert client.get(f"/api/applications/{app_id}/documents/{doc_id}/download", headers={"Authorization": f"Bearer {admin_token}"}).status_code == 404
+
+        # 9. Admin CANNOT assign, review, or modify draft application
+        assert client.patch(
             f"/api/applications/{app_id}/assign",
             json={"officer_id": off_info["id"]},
             headers={"Authorization": f"Bearer {admin_token}"},
-        )
-        assert admin_assign.status_code == 409
+        ).status_code in (404, 409)
+
+        assert client.post(
+            f"/api/applications/{app_id}/reviews",
+            json={"action": "REVIEW_NOTE", "notes": "Admin review on draft"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        ).status_code in (404, 409)
+
+        assert client.patch(
+            f"/api/applications/{app_id}/status",
+            json={"status": "UNDER_REVIEW"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        ).status_code in (403, 404)
 
 
 # ===========================================================================
@@ -1037,13 +1075,13 @@ class TestRoleSpecificOfficerAndAdminPermissions:
         )
         app_id = app_res.json()["id"]
 
-        # 2. Cannot assign draft application -> 409
+        # 2. Cannot assign draft application -> 404 or 409
         assign_draft = client.patch(
             f"/api/applications/{app_id}/assign",
             json={"officer_id": off_id},
             headers={"Authorization": f"Bearer {admin_token}"},
         )
-        assert assign_draft.status_code == 409
+        assert assign_draft.status_code in (404, 409)
 
         # Submit application
         client.patch(
@@ -1258,4 +1296,748 @@ class TestRoleSpecificOfficerAndAdminPermissions:
         d_data = detail_res.json()
         assert d_data["live_issuer_verification"] == "NOT_CONFIGURED"
         assert "Heuristic triage score" in d_data["risk_score_note"]
+
+
+# ===========================================================================
+# 13. Deficiency Memo Assistant Tests
+# ===========================================================================
+class TestDeficiencyMemoAssistant:
+    def test_memo_access_control(self):
+        admin_token = login_token("admin@example.com", "DemoAdmin123!")
+        inst_token = login_token("institution@example.com", "DemoInstitution123!")
+        off_token = login_token("officer@example.com", "DemoOfficer123!")
+        off_id = client.get("/api/auth/me", headers={"Authorization": f"Bearer {off_token}"}).json()["id"]
+
+        # Ensure officer2 exists
+        client.post(
+            "/api/admin/users",
+            json={"email": "off_memo2@example.com", "name": "Officer Memo Two", "password": "Password123!", "role": "officer"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        off2_token = login_token("off_memo2@example.com", "Password123!")
+
+        # 1. Institution creates draft
+        app_res = client.post(
+            "/api/applications",
+            json={"institution_name": "Memo Security Institute", "academic_year": "2026-27"},
+            headers={"Authorization": f"Bearer {inst_token}"},
+        )
+        app_id = app_res.json()["id"]
+
+        # 2. Institution cannot call /memo endpoint -> 403
+        inst_memo = client.post(f"/api/applications/{app_id}/memo", headers={"Authorization": f"Bearer {inst_token}"})
+        assert inst_memo.status_code == 403
+
+        # 3. Cannot generate memo on draft application -> 404 for officer (draft is hidden) or 409
+        off_draft_memo = client.post(f"/api/applications/{app_id}/memo", headers={"Authorization": f"Bearer {off_token}"})
+        assert off_draft_memo.status_code in (404, 409)
+
+        # 4. Submit application
+        client.patch(
+            f"/api/applications/{app_id}/status",
+            json={"status": "UNDER_REVIEW"},
+            headers={"Authorization": f"Bearer {inst_token}"},
+        )
+
+        # 5. Unassigned officer cannot generate memo -> 403
+        unassigned_memo = client.post(f"/api/applications/{app_id}/memo", headers={"Authorization": f"Bearer {off_token}"})
+        assert unassigned_memo.status_code == 403
+
+        # 6. Assign to off_id
+        client.patch(
+            f"/api/applications/{app_id}/assign",
+            json={"officer_id": off_id},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+        # 7. Other officer (off2) cannot access or generate memo -> 403 or 404 (due to assignment isolation)
+        other_officer_memo = client.post(f"/api/applications/{app_id}/memo", headers={"Authorization": f"Bearer {off2_token}"})
+        assert other_officer_memo.status_code in (403, 404)
+
+        # 8. Assigned officer can generate memo -> 200
+        assigned_memo = client.post(f"/api/applications/{app_id}/memo", headers={"Authorization": f"Bearer {off_token}"})
+        assert assigned_memo.status_code == 200
+        data = assigned_memo.json()
+        assert "memo" in data
+        assert "disclaimer" in data
+        assert "status" in data
+
+        # 9. Admin can also generate memo -> 200
+        admin_memo = client.post(f"/api/applications/{app_id}/memo", headers={"Authorization": f"Bearer {admin_token}"})
+        assert admin_memo.status_code == 200
+
+    def test_memo_contains_required_sections_and_grounded_findings(self):
+        admin_token = login_token("admin@example.com", "DemoAdmin123!")
+        inst_token = login_token("institution@example.com", "DemoInstitution123!")
+        off_token = login_token("officer@example.com", "DemoOfficer123!")
+        off_id = client.get("/api/auth/me", headers={"Authorization": f"Bearer {off_token}"}).json()["id"]
+
+        # Create application with detailed metadata
+        app_res = client.post(
+            "/api/applications",
+            json={
+                "institution_name": "Apex Engineering Institute",
+                "institution_code": "APEX-ENG-777",
+                "application_type": "Extension of Approval",
+                "academic_year": "2026-27",
+                "programme": "Engineering and Technology",
+                "current_intake": 120,
+                "proposed_intake": 180,
+            },
+            headers={"Authorization": f"Bearer {inst_token}"},
+        )
+        app_id = app_res.json()["id"]
+
+        # Upload document that creates findings
+        pdf = make_valid_pdf("Land ownership document with partial registration survey number")
+        client.post(
+            f"/api/applications/{app_id}/documents",
+            files={"file": ("land_record.pdf", pdf, "application/pdf")},
+            headers={"Authorization": f"Bearer {inst_token}"},
+        )
+
+        # Submit and assign
+        client.patch(
+            f"/api/applications/{app_id}/status",
+            json={"status": "UNDER_REVIEW"},
+            headers={"Authorization": f"Bearer {inst_token}"},
+        )
+        client.patch(
+            f"/api/applications/{app_id}/assign",
+            json={"officer_id": off_id},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+        res = client.post(f"/api/applications/{app_id}/memo", headers={"Authorization": f"Bearer {off_token}"})
+        assert res.status_code == 200
+        data = res.json()
+        memo_text = data["memo"]
+
+        # Verify Header & Metadata
+        assert "AICTE Compliance Pre-Screening Deficiency Memorandum (Draft)" in memo_text
+        assert "Apex Engineering Institute" in memo_text
+        assert "APEX-ENG-777" in memo_text
+        assert f"AICTE-APP-{app_id:06d}" in memo_text
+        assert "Engineering and Technology" in memo_text
+        assert "120 / 180" in memo_text
+
+        # Verify Section 1: Identified Deficiencies
+        assert "### 1. Identified Deficiencies & Flagged Pre-Screening Checks" in memo_text
+
+        # Verify Section 2: Specific Grounded Correction Instructions
+        assert "### 2. Specific Grounded Correction Instructions" in memo_text
+        assert "Rectification Timeline:" in memo_text
+        assert "official AICTE approval process calendar" in memo_text
+
+        # Verify Section 3: Compliance Officer Scrutiny & Determination Block
+        assert "### 3. Compliance Officer Scrutiny & Determination Block" in memo_text
+        assert "Officer Determination:" in memo_text
+        assert "Officer Signature & Seal:" in memo_text
+
+        # Verify Regulatory Disclaimers & Non-Official Marking
+        assert "Decision-support draft only" in memo_text
+        assert "Does NOT constitute an official AICTE regulatory decision" in memo_text
+        assert data["disclaimer"] is not None
+
+    def test_memo_clean_state_without_deficiencies(self):
+        admin_token = login_token("admin@example.com", "DemoAdmin123!")
+        inst_token = login_token("institution@example.com", "DemoInstitution123!")
+        off_token = login_token("officer@example.com", "DemoOfficer123!")
+        off_id = client.get("/api/auth/me", headers={"Authorization": f"Bearer {off_token}"}).json()["id"]
+
+        # Create clean application without documents/deficiencies
+        app_res = client.post(
+            "/api/applications",
+            json={"institution_name": "Pristine Compliance College", "academic_year": "2026-27"},
+            headers={"Authorization": f"Bearer {inst_token}"},
+        )
+        app_id = app_res.json()["id"]
+
+        client.patch(
+            f"/api/applications/{app_id}/status",
+            json={"status": "UNDER_REVIEW"},
+            headers={"Authorization": f"Bearer {inst_token}"},
+        )
+        client.patch(
+            f"/api/applications/{app_id}/assign",
+            json={"officer_id": off_id},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+        res = client.post(f"/api/applications/{app_id}/memo", headers={"Authorization": f"Bearer {off_token}"})
+        assert res.status_code == 200
+        memo_text = res.json()["memo"]
+
+        assert "No regulatory deficiencies or check failures were flagged" in memo_text
+        assert "No specific document rectifications are currently required" in memo_text
+        assert "### 3. Compliance Officer Scrutiny & Determination Block" in memo_text
+
+    def test_memo_deterministic_fallback_when_unconfigured(self, monkeypatch):
+        from app.config import settings
+        admin_token = login_token("admin@example.com", "DemoAdmin123!")
+        inst_token = login_token("institution@example.com", "DemoInstitution123!")
+        off_token = login_token("officer@example.com", "DemoOfficer123!")
+        off_id = client.get("/api/auth/me", headers={"Authorization": f"Bearer {off_token}"}).json()["id"]
+
+        app_res = client.post(
+            "/api/applications",
+            json={"institution_name": "Fallback Test Academy", "academic_year": "2026-27"},
+            headers={"Authorization": f"Bearer {inst_token}"},
+        )
+        app_id = app_res.json()["id"]
+        client.patch(f"/api/applications/{app_id}/status", json={"status": "UNDER_REVIEW"}, headers={"Authorization": f"Bearer {inst_token}"})
+        client.patch(f"/api/applications/{app_id}/assign", json={"officer_id": off_id}, headers={"Authorization": f"Bearer {admin_token}"})
+
+        # Monkeypatch GEMINI_API_KEY to empty string
+        monkeypatch.setattr(settings, "gemini_api_key", "")
+
+        res = client.post(f"/api/applications/{app_id}/memo", headers={"Authorization": f"Bearer {off_token}"})
+        assert res.status_code == 200
+        data = res.json()
+        assert data["ai_assisted"] is False
+        assert data["is_fallback"] is True
+        assert data["status"] == "fallback"
+        assert "GEMINI_API_KEY is not configured" in data["fallback_reason"]
+        assert len(data["memo"]) > 100
+        assert "### 1. Identified Deficiencies & Flagged Pre-Screening Checks" in data["memo"]
+
+    def test_memo_fallback_on_gemini_truncation_or_error(self, monkeypatch):
+        from app import services
+        from unittest.mock import MagicMock
+        from app.config import settings
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "candidates": [
+                {
+                    "finishReason": "MAX_TOKENS",
+                    "content": {"parts": [{"text": "DATE: [Current date]"}]}
+                }
+            ]
+        }
+
+        monkeypatch.setattr("httpx.post", lambda *args, **kwargs: mock_response)
+        monkeypatch.setattr(settings, "gemini_api_key", "test-key-12345")
+
+        app_dict = {"id": 101, "institution_name": "Truncation Test College", "assigned_officer_name": "Demo Officer"}
+        result = services.gemini_memo(app_dict, [])
+        assert result["is_fallback"] is True
+        assert result["ai_assisted"] is False
+        assert "incomplete or truncated" in result["fallback_reason"] or "MAX_TOKENS" in result["fallback_reason"]
+        assert "### 1. Identified Deficiencies & Flagged Pre-Screening Checks" in result["memo"]
+
+    def test_memo_transient_503_retry_success(self, monkeypatch):
+        from app import services
+        from unittest.mock import MagicMock
+        from app.config import settings
+
+        attempts = []
+
+        def mock_post(url, **kwargs):
+            attempts.append(url)
+            mock_res = MagicMock()
+            if len(attempts) == 1:
+                mock_res.status_code = 503
+                mock_res.json.return_value = {"error": {"message": "Model overloaded"}}
+                mock_res.text = "Model overloaded"
+                return mock_res
+            else:
+                mock_res.status_code = 200
+                mock_res.json.return_value = {
+                    "candidates": [
+                        {
+                            "finishReason": "STOP",
+                            "content": {
+                                "parts": [
+                                    {"text": "# AICTE Compliance Pre-Screening Deficiency Memorandum (Draft)\n\nThis memorandum summarizes identified deficiencies grounded strictly in pre-screening findings.\n\nAll pre-screening checks scrutinized. Compliance officer scrutiny and determination are required."}
+                                ]
+                            },
+                        }
+                    ]
+                }
+                return mock_res
+
+        monkeypatch.setattr("httpx.post", mock_post)
+        monkeypatch.setattr(settings, "gemini_api_key", "test-key-safe")
+        monkeypatch.setattr(settings, "gemini_max_retries", 2)
+
+        app_dict = {"id": 102, "institution_name": "Retry Success Academy", "assigned_officer_name": "Officer Test"}
+        result = services.gemini_memo(app_dict, [], sleep_fn=lambda _: None)
+
+        assert len(attempts) == 2  # 1 initial + 1 retry
+        assert result["ai_assisted"] is True
+        assert result["is_fallback"] is False
+        assert result["status"] == "success"
+        assert "AICTE Compliance Pre-Screening Deficiency Memorandum" in result["memo"]
+
+    def test_memo_transient_503_exhausts_retries_deterministic_fallback(self, monkeypatch):
+        from app import services
+        from unittest.mock import MagicMock
+        from app.config import settings
+
+        attempts = []
+
+        def mock_post(url, **kwargs):
+            attempts.append(url)
+            mock_res = MagicMock()
+            mock_res.status_code = 503
+            mock_res.json.return_value = {"error": {"message": "Service Unavailable"}}
+            mock_res.text = "Service Unavailable"
+            return mock_res
+
+        monkeypatch.setattr("httpx.post", mock_post)
+        monkeypatch.setattr(settings, "gemini_api_key", "test-key-safe")
+        monkeypatch.setattr(settings, "gemini_model", "gemini-2.5-flash")
+        monkeypatch.setattr(settings, "gemini_fallback_model", "")
+        monkeypatch.setattr(settings, "gemini_max_retries", 2)
+
+        app_dict = {"id": 103, "institution_name": "503 Fallback Academy", "assigned_officer_name": "Officer Test"}
+        result = services.gemini_memo(app_dict, [], sleep_fn=lambda _: None)
+
+        assert len(attempts) == 3  # initial + 2 retries
+        assert result["ai_assisted"] is False
+        assert result["is_fallback"] is True
+        assert result["status"] == "fallback"
+        assert "503" in result["fallback_reason"]
+        assert "### 1. Identified Deficiencies & Flagged Pre-Screening Checks" in result["memo"]
+
+    def test_memo_503_fallback_model_success(self, monkeypatch):
+        from app import services
+        from unittest.mock import MagicMock
+        from app.config import settings
+
+        model_calls = []
+
+        def mock_post(url, **kwargs):
+            model_calls.append(url)
+            mock_res = MagicMock()
+            if "gemini-2.5-flash" in url:
+                mock_res.status_code = 503
+                mock_res.json.return_value = {"error": {"message": "Primary model unavailable"}}
+                mock_res.text = "Primary model unavailable"
+                return mock_res
+            elif "gemini-2.0-flash" in url:
+                mock_res.status_code = 200
+                mock_res.json.return_value = {
+                    "candidates": [
+                        {
+                            "finishReason": "STOP",
+                            "content": {
+                                "parts": [
+                                    {"text": "# AICTE Fallback Memorandum\n\nSuccessfully generated via configured fallback model after primary 503 error.\n\nAll pre-screening checks have been systematically reviewed and noted for officer determination."}
+                                ]
+                            },
+                        }
+                    ]
+                }
+                return mock_res
+            mock_res.status_code = 500
+            return mock_res
+
+        monkeypatch.setattr("httpx.post", mock_post)
+        monkeypatch.setattr(settings, "gemini_api_key", "test-key-safe")
+        monkeypatch.setattr(settings, "gemini_model", "gemini-2.5-flash")
+        monkeypatch.setattr(settings, "gemini_fallback_model", "gemini-2.0-flash")
+        monkeypatch.setattr(settings, "gemini_max_retries", 1)  # 1 retry on primary, then fallback
+
+        app_dict = {"id": 104, "institution_name": "Fallback Model College", "assigned_officer_name": "Officer Test"}
+        result = services.gemini_memo(app_dict, [], sleep_fn=lambda _: None)
+
+        # Primary was called 2 times (initial + 1 retry), then fallback was called 1 time and succeeded
+        assert any("gemini-2.5-flash" in u for u in model_calls)
+        assert any("gemini-2.0-flash" in u for u in model_calls)
+        assert result["ai_assisted"] is True
+        assert result["is_fallback"] is False
+        assert result["status"] == "success"
+        assert "AICTE Fallback Memorandum" in result["memo"]
+
+    def test_memo_non_retryable_error_no_retry(self, monkeypatch):
+        from app import services
+        from unittest.mock import MagicMock
+        from app.config import settings
+
+        attempts = []
+
+        def mock_post(url, **kwargs):
+            attempts.append(url)
+            mock_res = MagicMock()
+            mock_res.status_code = 403
+            mock_res.json.return_value = {"error": {"message": "API_KEY_INVALID: API key not valid"}}
+            mock_res.text = "API_KEY_INVALID"
+            return mock_res
+
+        monkeypatch.setattr("httpx.post", mock_post)
+        monkeypatch.setattr(settings, "gemini_api_key", "invalid-key")
+        monkeypatch.setattr(settings, "gemini_fallback_model", "gemini-other")
+        monkeypatch.setattr(settings, "gemini_max_retries", 3)
+
+        app_dict = {"id": 105, "institution_name": "No Retry College", "assigned_officer_name": "Officer Test"}
+        result = services.gemini_memo(app_dict, [], sleep_fn=lambda _: None)
+
+        # Non-retryable error (403 invalid key): MUST NOT retry and MUST NOT call fallback model
+        assert len(attempts) == 1
+        assert result["ai_assisted"] is False
+        assert result["is_fallback"] is True
+        assert "403" in result["fallback_reason"]
+
+    def test_memo_read_timeout_retry_success(self, monkeypatch):
+        import httpx
+        from app import services
+        from unittest.mock import MagicMock
+        from app.config import settings
+
+        attempts = []
+
+        def mock_post(url, **kwargs):
+            attempts.append(url)
+            if len(attempts) == 1:
+                raise httpx.ReadTimeout("Connection read timed out while waiting for Gemini")
+            mock_res = MagicMock()
+            mock_res.status_code = 200
+            mock_res.json.return_value = {
+                "candidates": [
+                    {
+                        "finishReason": "STOP",
+                        "content": {
+                            "parts": [
+                                {"text": "# AICTE Pre-Screening Memorandum\n\nSuccessfully generated on retry after transient read timeout occurred.\n\nAll pre-screening checks have been systematically reviewed and noted for compliance officer determination."}
+                            ]
+                        },
+                    }
+                ]
+            }
+            return mock_res
+
+        monkeypatch.setattr("httpx.post", mock_post)
+        monkeypatch.setattr(settings, "gemini_api_key", "test-key-safe")
+        monkeypatch.setattr(settings, "gemini_max_retries", 2)
+
+        app_dict = {"id": 106, "institution_name": "Timeout Retry College", "assigned_officer_name": "Officer Test"}
+        result = services.gemini_memo(app_dict, [], sleep_fn=lambda _: None)
+
+        assert len(attempts) == 2  # 1st timed out, 2nd succeeded
+        assert result["ai_assisted"] is True
+        assert result["is_fallback"] is False
+        assert "AICTE Pre-Screening Memorandum" in result["memo"]
+
+    def test_safe_logging_never_exposes_api_key(self):
+        from app.services import _sanitize_log_message, _extract_safe_response_error
+        from unittest.mock import MagicMock
+
+        secret = "AIzaSySecretKey999"
+        msg_with_key = f"Error calling url https://api.google.com?key={secret} - failed"
+        sanitized = _sanitize_log_message(msg_with_key, secret)
+        assert secret not in sanitized
+        assert "[REDACTED]" in sanitized
+
+        mock_res = MagicMock()
+        mock_res.json.side_effect = Exception("not json")
+        mock_res.text = f"Invalid key: {secret}"
+        safe_err = _extract_safe_response_error(mock_res, secret)
+        assert secret not in safe_err
+        assert "[REDACTED]" in safe_err
+
+    def test_memo_unverified_model_fails_fast_without_network_call(self, monkeypatch):
+        from app import services
+        from unittest.mock import MagicMock
+        from app.config import settings
+
+        network_calls = []
+
+        def mock_post(url, **kwargs):
+            network_calls.append(url)
+            return MagicMock(status_code=200)
+
+        monkeypatch.setattr("httpx.post", mock_post)
+        monkeypatch.setattr(settings, "gemini_api_key", "test-key-safe")
+        # Configure the exact unverified model from the user's issue
+        monkeypatch.setattr(settings, "gemini_model", "gemini-3.5-flash-lite")
+        monkeypatch.setattr(settings, "gemini_fallback_model", "")
+
+        app_dict = {"id": 107, "institution_name": "Unverified Model College", "assigned_officer_name": "Officer Test"}
+        result = services.gemini_memo(app_dict, [], sleep_fn=lambda _: None)
+
+        # MUST NOT make network calls to unverified models
+        assert len(network_calls) == 0
+        assert result["ai_assisted"] is False
+        assert result["is_fallback"] is True
+        assert result["status"] == "fallback"
+        assert "gemini-3.5-flash-lite" in result["fallback_reason"]
+        assert "not in Google's supported Gemini model list" in result["fallback_reason"]
+        assert "### 1. Identified Deficiencies & Flagged Pre-Screening Checks" in result["memo"]
+
+    def test_memo_read_timeout_exhausts_retries_deterministic_fallback(self, monkeypatch):
+        import httpx
+        from app import services
+        from app.config import settings
+
+        attempts = []
+
+        def mock_post(url, **kwargs):
+            attempts.append(url)
+            raise httpx.ReadTimeout("Server took too long to stream response")
+
+        monkeypatch.setattr("httpx.post", mock_post)
+        monkeypatch.setattr(settings, "gemini_api_key", "test-key-safe")
+        monkeypatch.setattr(settings, "gemini_model", "gemini-2.5-flash")
+        monkeypatch.setattr(settings, "gemini_fallback_model", "")
+        monkeypatch.setattr(settings, "gemini_max_retries", 1)
+
+        app_dict = {"id": 108, "institution_name": "Persistent Timeout College", "assigned_officer_name": "Officer Test"}
+        result = services.gemini_memo(app_dict, [], sleep_fn=lambda _: None)
+
+        # 1 initial + 1 retry = 2 attempts
+        assert len(attempts) == 2
+        assert result["ai_assisted"] is False
+        assert result["is_fallback"] is True
+        assert result["status"] == "fallback"
+        assert "ReadTimeout" in result["fallback_reason"] or "network timeout" in result["fallback_reason"]
+        assert "### 1. Identified Deficiencies & Flagged Pre-Screening Checks" in result["memo"]
+
+    def test_memo_with_dict_list_string_and_missing_evidence(self, monkeypatch):
+        """
+        Regression test: findings evidence can be a dict, list, string, or None/missing.
+        Ensure format_evidence_text and gemini_memo / generate_deterministic_memo
+        safely process all evidence types without raising AttributeError: 'dict' object has no attribute 'strip'.
+        """
+        from app import services
+        from unittest.mock import MagicMock
+        from app.config import settings
+
+        captured_prompt = []
+
+        def mock_post(url, **kwargs):
+            captured_prompt.append(kwargs.get("json", {}))
+            mock_res = MagicMock()
+            mock_res.status_code = 200
+            mock_res.json.return_value = {
+                "candidates": [
+                    {
+                        "finishReason": "STOP",
+                        "content": {
+                            "parts": [
+                                {
+                                    "text": "# AICTE Pre-Screening Memorandum\n\nVerified findings with dictionary and structured evidence.\n\nAll pre-screening checks have been systematically reviewed and noted for compliance officer determination."
+                                }
+                            ]
+                        },
+                    }
+                ]
+            }
+            return mock_res
+
+        monkeypatch.setattr("httpx.post", mock_post)
+        monkeypatch.setattr(settings, "gemini_api_key", "test-key-safe")
+        monkeypatch.setattr(settings, "gemini_model", "gemini-2.5-flash")
+
+        diverse_findings = [
+            # 1. Dictionary evidence (like DOC-003 duplicate hash check)
+            {
+                "rule_id": "DOC-003",
+                "severity": "medium",
+                "result": "NEEDS_REVIEW",
+                "message": "Duplicate file hash detected in compliance database",
+                "source_reference": "Illustrative rule pack: DOC-003",
+                "evidence": {
+                    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                    "scope": "same_application",
+                    "matched_document_id": 42,
+                    "matched_filename": "syllabus_duplicate.pdf",
+                },
+                "document_id": 101,
+            },
+            # 2. String evidence
+            {
+                "rule_id": "DOC-001",
+                "severity": "low",
+                "result": "NEEDS_REVIEW",
+                "message": "Document classification requires manual verification",
+                "source_reference": "Illustrative rule pack: DOC-001",
+                "evidence": "Matched keywords: 'extension of approval', 'aicte approval'",
+                "document_id": 102,
+            },
+            # 3. List evidence
+            {
+                "rule_id": "DOC-004",
+                "severity": "medium",
+                "result": "NEEDS_REVIEW",
+                "message": "Missing required endorsements",
+                "source_reference": "AICTE Handbook clause 4.2",
+                "evidence": ["Notarized Stamp Missing", "Authorised Signatory Missing"],
+                "document_id": 103,
+            },
+            # 4. Missing / None evidence
+            {
+                "rule_id": "DOC-002",
+                "severity": "high",
+                "result": "NOT_VERIFIED",
+                "message": "Issuer authenticity unverified",
+                "source_reference": "AICTE Handbook clause 2.1",
+                "evidence": None,
+                "document_id": 104,
+            },
+            # 5. Empty dictionary evidence
+            {
+                "rule_id": "FACULTY-01",
+                "severity": "high",
+                "result": "FAIL",
+                "message": "Cadre ratio does not satisfy 1:2:6 norm",
+                "source_reference": "AICTE Approval Process Handbook",
+                "evidence": {},
+                "document_id": 105,
+            },
+        ]
+
+        app_dict = {"id": 109, "institution_name": "Multi Type Evidence Institute", "assigned_officer_name": "Officer Test"}
+        result = services.gemini_memo(app_dict, diverse_findings, sleep_fn=lambda _: None)
+
+        assert result["ai_assisted"] is True
+        assert result["is_fallback"] is False
+        assert result["status"] == "success"
+
+        # Verify prompt contained serialized JSON for dict and list evidence
+        prompt_text = captured_prompt[0]["contents"][0]["parts"][0]["text"]
+        assert "syllabus_duplicate.pdf" in prompt_text
+        assert "same_application" in prompt_text
+        assert "Notarized Stamp Missing" in prompt_text
+
+        # Verify deterministic fallback memo also formats dict and list evidence without error
+        fallback_text = services.generate_deterministic_memo(app_dict, diverse_findings, fallback_reason="Test")
+        assert "syllabus_duplicate.pdf" in fallback_text
+        assert "Notarized Stamp Missing" in fallback_text
+        assert "DOC-003" in fallback_text
+        assert "DOC-001" in fallback_text
+
+    def test_format_evidence_text_helper_unit(self):
+        from app.services import format_evidence_text
+
+        # None / empty
+        assert format_evidence_text(None) == ""
+        assert format_evidence_text("") == ""
+
+        # String with whitespace
+        assert format_evidence_text("  evidence string  ") == "evidence string"
+
+        # Dictionary with deterministic keys
+        d = {"z_key": 1, "a_key": "val"}
+        res_d = format_evidence_text(d)
+        assert res_d == '{"a_key": "val", "z_key": 1}'
+
+        # List
+        lst = ["a", "b"]
+        assert format_evidence_text(lst) == '["a", "b"]'
+
+        # Numbers and Booleans
+        assert format_evidence_text(123) == "123"
+        assert format_evidence_text(True) == "True"
+
+    def test_gemini_startup_log_safe_and_redacts_keys(self, monkeypatch, caplog):
+        import logging
+        from app.main import log_gemini_startup_configuration
+        from app.config import settings
+
+        secret_key = "AIzaSySecretKeyNeverLogMe12345"
+        monkeypatch.setattr(settings, "gemini_api_key", secret_key)
+        monkeypatch.setattr(settings, "gemini_model", "gemini-3.8-flash")
+        monkeypatch.setattr(settings, "gemini_fallback_model", "gemini-2.5-flash")
+
+        with caplog.at_level(logging.INFO):
+            result = log_gemini_startup_configuration()
+
+        log_text = caplog.text
+        # Must show effective primary and fallback models
+        assert "Effective Primary Model:  'gemini-3.8-flash'" in log_text
+        assert "Effective Fallback Model: 'gemini-2.5-flash'" in log_text
+        assert "YES (masked)" in log_text
+        # MUST NEVER log the real API key
+        assert secret_key not in log_text
+        assert result["diagnostics"]["effective_primary_model"] == "gemini-3.8-flash"
+        assert result["diagnostics"]["effective_fallback_model"] == "gemini-2.5-flash"
+
+    def test_gemini_live_model_validation_against_google_api(self, monkeypatch):
+        from unittest.mock import MagicMock
+        from app import services
+
+        services.clear_gemini_models_cache()
+
+        mock_models = {
+            "models": [
+                {"name": "models/gemini-3.8-flash", "supportedGenerationMethods": ["generateContent"]},
+                {"name": "models/gemini-2.5-flash", "supportedGenerationMethods": ["generateContent"]},
+                {"name": "models/embedding-001", "supportedGenerationMethods": ["embedContent"]},
+            ]
+        }
+
+        def mock_get(url, **kwargs):
+            mock_res = MagicMock()
+            mock_res.status_code = 200
+            mock_res.json.return_value = mock_models
+            return mock_res
+
+        monkeypatch.setattr("httpx.get", mock_get)
+
+        report = services.validate_gemini_models(
+            primary_model="gemini-3.8-flash",
+            fallback_model="gemini-2.5-flash",
+            api_key="valid-test-key-for-test",
+        )
+
+        assert report["remote_check_performed"] is True
+        assert report["remote_check_success"] is True
+        assert report["validation_source"] == "google_api_live"
+        assert report["primary_valid"] is True
+        assert report["fallback_valid"] is True
+        assert "verified and available" in report["detail"]
+
+    def test_gemini_live_model_validation_rejects_unavailable_model(self, monkeypatch):
+        from unittest.mock import MagicMock
+        from app import services
+
+        services.clear_gemini_models_cache()
+
+        mock_models = {
+            "models": [
+                {"name": "models/gemini-3.8-flash", "supportedGenerationMethods": ["generateContent"]},
+                {"name": "models/gemini-2.5-flash", "supportedGenerationMethods": ["generateContent"]},
+            ]
+        }
+
+        def mock_get(url, **kwargs):
+            mock_res = MagicMock()
+            mock_res.status_code = 200
+            mock_res.json.return_value = mock_models
+            return mock_res
+
+        monkeypatch.setattr("httpx.get", mock_get)
+
+        # gemini-2.0-flash is NOT in available models
+        report = services.validate_gemini_models(
+            primary_model="gemini-2.0-flash",
+            fallback_model="",
+            api_key="valid-test-key-for-test",
+        )
+
+        assert report["remote_check_performed"] is True
+        assert report["remote_check_success"] is True
+        assert report["validation_source"] == "google_api_live"
+        assert report["primary_valid"] is False
+        assert "NOT available in this Google Gemini project/key" in report["detail"]
+
+    def test_model_config_diagnostics_detects_env_overrides(self, monkeypatch):
+        import os
+        from app.config import get_model_config_diagnostics, settings
+
+        monkeypatch.setenv("GEMINI_MODEL", "gemini-3.8-flash")
+        monkeypatch.setenv("GEMINI_FALLBACK_MODEL", "gemini-2.5-flash")
+
+        diag = get_model_config_diagnostics()
+        assert diag["env_var_override_primary"] == "gemini-3.8-flash"
+        assert diag["env_var_override_fallback"] == "gemini-2.5-flash"
+        assert diag["is_overridden_by_env"] is True
+        assert len(diag["inspected_env_files"]) >= 2
+
+
+
+
 

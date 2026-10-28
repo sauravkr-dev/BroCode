@@ -22,6 +22,66 @@ from .services import extract_text, classify_document, store_findings, heuristic
 import logging
 
 logger = logging.getLogger("brocode")
+logging.getLogger("httpx").setLevel(logging.WARNING)
+
+def log_gemini_startup_configuration() -> dict:
+    """
+    Logs effective Gemini configuration safely at startup:
+    - Primary and fallback model IDs
+    - Configuration source (environment variable override vs .env file)
+    - Validates models against actual Google Gemini API models available to key/project
+    - Never logs API keys or secrets.
+    """
+    from .config import get_model_config_diagnostics
+    from .services import validate_gemini_models
+
+    diag = get_model_config_diagnostics()
+    primary = diag["effective_primary_model"]
+    fallback = diag["effective_fallback_model"] or "none"
+    has_key = diag["api_key_configured"]
+
+    logger.info("================================================================================")
+    logger.info("BroCode Gemini Startup Configuration:")
+    logger.info("  Effective Primary Model:  '%s'", primary)
+    logger.info("  Effective Fallback Model: '%s'", fallback)
+    logger.info("  API Key Configured:       %s", "YES (masked)" if has_key else "NO (deterministic fallback only)")
+
+    if diag["is_overridden_by_env"]:
+        if diag["env_var_override_primary"]:
+            logger.warning(
+                "  NOTE: GEMINI_MODEL is overridden by OS/shell environment variable: '%s' "
+                "(this takes precedence over values in backend/.env).",
+                diag["env_var_override_primary"],
+            )
+        if diag["env_var_override_fallback"]:
+            logger.warning(
+                "  NOTE: GEMINI_FALLBACK_MODEL is overridden by OS/shell environment variable: '%s'.",
+                diag["env_var_override_fallback"],
+            )
+    else:
+        loaded = diag.get("loaded_env_files") or []
+        logger.info("  Loaded from .env files:   %s", ", ".join(loaded) if loaded else "None (default settings)")
+
+    # Validate against actual Google Gemini API models available to key/project
+    val_report = validate_gemini_models(primary, fallback if fallback != "none" else "")
+    logger.info("  Model Validation Source:  %s", val_report["validation_source"])
+    if val_report["primary_valid"]:
+        logger.info("  Primary Model Status:     VALID (%s)", val_report["detail"])
+    else:
+        logger.warning("  Primary Model Status:     INVALID / UNAVAILABLE (%s)", val_report["detail"])
+
+    if fallback != "none":
+        if val_report["fallback_valid"]:
+            logger.info("  Fallback Model Status:    VALID")
+        else:
+            logger.warning("  Fallback Model Status:    INVALID / UNAVAILABLE")
+
+    logger.info("================================================================================")
+    return {
+        "diagnostics": diag,
+        "validation": val_report,
+    }
+
 
 # ---------------------------------------------------------------------------
 # Startup: create tables, run schema migrations + seed demo users safely
@@ -75,6 +135,11 @@ def startup():
         finally:
             db.close()
 
+    try:
+        log_gemini_startup_configuration()
+    except Exception as e:
+        logger.warning("Gemini startup configuration log error: %s", e)
+
 
 @asynccontextmanager
 async def lifespan(app_instance: FastAPI):
@@ -108,8 +173,8 @@ MAX_BYTES = settings.max_upload_mb * 1024 * 1024
 def can_access(app_record: Application, user: User) -> bool:
     """
     Access rules:
-    - Draft applications: Visible ONLY to the institution that owns them (and admin oversight).
-      Officers NEVER have access to another institution's Draft applications.
+    - Draft applications: Visible ONLY to the institution that owns them.
+      Neither officers nor admins may access another institution's draft.
     - Submitted / Active applications:
       - Admin: Full oversight access across all applications.
       - Institution: Access only to own applications.
@@ -119,9 +184,7 @@ def can_access(app_record: Application, user: User) -> bool:
     if app_record.status == "DRAFT":
         if user.role == "institution":
             return app_record.owner_id == user.id
-        if user.role == "admin":
-            return True
-        # Officers must never see or access draft applications under any circumstances
+        # Neither officers nor admins may access draft applications
         return False
 
     if user.role == "admin":
@@ -288,25 +351,21 @@ def create_application(
 
 @app.get("/api/applications")
 def list_applications(
-    include_drafts: bool = Query(default=False, description="Admin oversight toggle to include draft applications"),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     q = select(Application).order_by(Application.updated_at.desc())
     if user.role == "institution":
-        # Institutions see only their own applications (including drafts)
+        # Institutions see only their own applications (including their own drafts)
         q = q.where(Application.owner_id == user.id)
     elif user.role == "officer":
-        # Officers NEVER see draft applications under any circumstances
+        # Officers never see draft applications; only see assigned-to-self or unassigned
         q = q.where(
             Application.status != "DRAFT",
             (Application.assigned_officer_id == user.id) | (Application.assigned_officer_id.is_(None)),
         )
-    elif user.role == "admin":
-        # Admins do not see Draft applications in normal review queue unless include_drafts=True
-        if not include_drafts:
-            q = q.where(Application.status != "DRAFT")
     else:
+        # Admins and any other role: never see draft applications
         q = q.where(Application.status != "DRAFT")
 
     rows = db.scalars(q).all()
@@ -1179,7 +1238,27 @@ def memo(
     if a.status == "DRAFT":
         raise HTTPException(409, "Deficiency memo cannot be generated for an unsubmitted draft application")
     if not can_modify_officer(a, user):
-        raise HTTPException(403, "Only the assigned compliance officer can generate memos for this application")
+        raise HTTPException(403, "Only the assigned compliance officer or authorized administrator can generate memos for this application")
+
+    assigned_officer = db.get(User, a.assigned_officer_id) if a.assigned_officer_id else None
+    memo_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    app_meta = {
+        "id": a.id,
+        "reference": f"AICTE-APP-{a.id:06d}",
+        "institution_name": a.institution_name,
+        "institution_code": a.institution_code or "Not provided",
+        "application_type": a.application_type,
+        "academic_year": a.academic_year,
+        "programme": a.programme or "Not specified",
+        "current_intake": a.current_intake if a.current_intake is not None else "Not provided",
+        "proposed_intake": a.proposed_intake if a.proposed_intake is not None else "Not provided",
+        "status": a.status,
+        "submission_version": getattr(a, "submission_version", 1) or 1,
+        "assigned_officer_name": assigned_officer.name if assigned_officer else "Unassigned (Triage Queue)",
+        "assigned_officer_id": a.assigned_officer_id,
+        "memo_date": memo_date,
+    }
 
     finds = db.scalars(select(Finding).where(Finding.application_id == app_id)).all()
     payload = [
@@ -1190,28 +1269,30 @@ def memo(
             "message": f.message,
             "source_reference": f.source_reference,
             "evidence": f.evidence,
+            "document_id": f.document_id,
         }
         for f in finds
     ]
-    text_content = gemini_memo(
-        {
-            "institution": a.institution_name,
-            "application_type": a.application_type,
-            "academic_year": a.academic_year,
-            "programme": a.programme,
-        },
-        payload,
-    )
+    memo_result = gemini_memo(app_meta, payload)
+    is_fallback = memo_result.get("is_fallback", False)
+    fallback_reason = memo_result.get("fallback_reason")
+    model_used = memo_result.get("model_used")
+    if is_fallback:
+        logger.info("Application #%d memo generated via deterministic fallback: %s", a.id, fallback_reason)
+    else:
+        logger.info("Application #%d memo generated via Gemini (%s)", a.id, model_used or "gemini")
+
     log_event(
         db, user.id, "MEMO_GENERATED", "application", a.id,
-        {"provider": "gemini" if settings.gemini_api_key else "none"},
+        {
+            "provider": "gemini" if memo_result.get("ai_assisted") else "deterministic_fallback",
+            "is_fallback": is_fallback,
+            "fallback_reason": fallback_reason,
+            "model_used": model_used,
+        },
     )
     db.commit()
-    return {
-        "memo": text_content,
-        "ai_assisted": bool(settings.gemini_api_key),
-        "disclaimer": "Draft only. Validate each statement against evidence and the applicable official rules before sending.",
-    }
+    return memo_result
 
 
 # ---------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 import React,{useEffect,useState} from 'react';
 import{createRoot}from'react-dom/client';
-import{ShieldCheck,Building2,FileCheck2,ClipboardList,Search,Plus,LogOut,RefreshCw,AlertTriangle,CheckCircle2,Clock3,UploadCloud,ArrowUpRight,LockKeyhole,Activity,FileText,MessageSquare,Users,Eye,Download,UserCheck,UserX,Trash2,RefreshCcw,Info}from'lucide-react';
+import{ShieldCheck,Building2,FileCheck2,ClipboardList,Search,Plus,LogOut,RefreshCw,AlertTriangle,CheckCircle2,Clock3,UploadCloud,ArrowUpRight,LockKeyhole,Activity,FileText,MessageSquare,Users,Eye,Download,UserCheck,UserX,Trash2,RefreshCcw,Info,Copy,Check}from'lucide-react';
 import'./style.css';
 
 const DEMO={institution:['institution@example.com','DemoInstitution123!'],officer:['officer@example.com','DemoOfficer123!'],admin:['admin@example.com','DemoAdmin123!']};
@@ -14,11 +14,13 @@ function App(){
   const[summary,setSummary]=useState(null);
   const[error,setError]=useState('');
   const[successMsg,setSuccessMsg]=useState('');
-  const[includeDrafts,setIncludeDrafts]=useState(false);
   const[busy,setBusy]=useState(false);
   const[login,setLogin]=useState({email:DEMO.institution[0],password:DEMO.institution[1]});
   const[form,setForm]=useState({institution_name:'',institution_code:'',application_type:'Extension of Approval',academic_year:'2026-27',programme:'',current_intake:'',proposed_intake:''});
   const[memo,setMemo]=useState('');
+  const[memoData,setMemoData]=useState(null);
+  const[memoViewMode,setMemoViewMode]=useState('formatted');
+  const[copied,setCopied]=useState(false);
   const[reviewNote,setReviewNote]=useState('');
   const[reviewAction,setReviewAction]=useState('REVIEW_NOTE');
   const[correctionInstructions,setCorrectionInstructions]=useState('');
@@ -38,12 +40,11 @@ function App(){
     return data;
   }
 
-  async function refresh(draftsFlag = includeDrafts){
+  async function refresh(){
     try{
       const me=await api('/api/auth/me');
       setUser(me);
-      const appUrl = (me.role === 'admin' && draftsFlag) ? '/api/applications?include_drafts=true' : '/api/applications';
-      const a=await api(appUrl);
+      const a=await api('/api/applications');
       setApps(a);
       if(me.role!=='institution')setSummary(await api('/api/officer/summary'));
       if(me.role==='admin'||me.role==='officer'){
@@ -53,7 +54,7 @@ function App(){
     }catch(e){setError(e.message);setToken('');localStorage.removeItem('bc_token')}
   }
 
-  useEffect(()=>{if(token)refresh(includeDrafts)},[token, includeDrafts]);
+  useEffect(()=>{if(token)refresh()},[token]);
 
   async function signIn(e){
     e.preventDefault();setBusy(true);setError('');setSuccessMsg('');
@@ -68,7 +69,7 @@ function App(){
   }
 
   async function openApp(a){
-    setSelected(a);setDetail(null);setMemo('');setReviewNote('');setCorrectionInstructions('');setFindingRef('');setError('');
+    setSelected(a);setDetail(null);setMemo('');setMemoData(null);setReviewNote('');setCorrectionInstructions('');setFindingRef('');setError('');
     try{
       const d=await api(`/api/applications/${a.id}`);
       setDetail(d);
@@ -240,14 +241,36 @@ function App(){
   }
 
   async function generateMemo(){
-    try{const d=await api(`/api/applications/${selected.id}/memo`,{method:'POST'});setMemo(d.memo)}catch(e){setError(e.message)}
+    if(!selected)return;
+    setBusy(true);setError('');setSuccessMsg('');
+    try{
+      const d=await api(`/api/applications/${selected.id}/memo`,{method:'POST'});
+      setMemo(d.memo);
+      setMemoData(d);
+      if(d.is_fallback || !d.ai_assisted){
+        setSuccessMsg(`Deficiency memorandum compiled via deterministic system fallback (${d.fallback_reason || 'AI unavailable'}).`);
+      } else {
+        setSuccessMsg(`AI deficiency memorandum draft generated successfully (${d.model_used || 'Gemini'}).`);
+      }
+    }catch(e){
+      setError(e.message);
+    }finally{
+      setBusy(false);
+    }
+  }
+
+  function copyMemo(){
+    if(!memo)return;
+    navigator.clipboard.writeText(memo);
+    setCopied(true);
+    setTimeout(()=>setCopied(false),2500);
   }
 
   async function loadAdminUsers(){
     try{const u=await api('/api/admin/users');setAdminUsers(u);setShowAdminPanel(true)}catch(e){setError(e.message)}
   }
 
-  function logout(){setToken('');setUser(null);setSelected(null);setDetail(null);setShowAdminPanel(false);localStorage.removeItem('bc_token')}
+  function logout(){setToken('');setUser(null);setSelected(null);setDetail(null);setMemo('');setMemoData(null);setShowAdminPanel(false);localStorage.removeItem('bc_token')}
 
   // --- Login Screen ---
   if(!token||!user)return <main className="login-shell"><section className="login-hero"><div className="brand"><span className="brand-icon"><ShieldCheck/></span><span>BroCode<span className="dot">.</span></span></div><div className="hero-copy"><div className="eyebrow">SIH 26261 · REGULATORY TECHNOLOGY</div><h1>Compliance clarity.<br/><em>Evidence first.</em></h1><p>AI-assisted application pre-screening for institutions and compliance teams — with traceable findings and human-led decisions.</p><div className="hero-points"><span><CheckCircle2/> Evidence-linked checks</span><span><LockKeyhole/> Role-based workspaces</span><span><Activity/> Audit-aware workflow</span></div></div><div className="hero-foot">DEMO ENVIRONMENT <span>•</span> NOT AN OFFICIAL AICTE PORTAL</div></section><section className="login-panel"><form className="login-card" onSubmit={signIn}><div className="mini-icon"><LockKeyhole/></div><div className="eyebrow">SECURE WORKSPACE</div><h2>Welcome back</h2><p className="muted">Sign in to your compliance workspace.</p>{error&&<div className="error">{error}</div>}<label>Email address<input type="email" required value={login.email} onChange={e=>setLogin({...login,email:e.target.value})}/></label><label>Password<input type="password" required value={login.password} onChange={e=>setLogin({...login,password:e.target.value})}/></label><button className="primary full" disabled={busy}>{busy?'Signing in…':'Sign in securely'} <ArrowUpRight size={17}/></button><div className="demo-box"><strong>Demo accounts</strong><div className="demo-buttons">{Object.entries(DEMO).map(([role,v])=><button type="button" key={role} onClick={()=>setLogin({email:v[0],password:v[1]})}>{role}</button>)}</div><small>Demo users only. Change credentials before deployment.</small></div></form></section></main>;
@@ -267,15 +290,65 @@ function App(){
   const activeDeficiency = detail?.reviews?.find(r => r.action === 'DEFICIENCY_REQUEST' || r.action === 'DEFICIENCY_RAISED');
 
   // --- Main App Shell ---
-  return <div className="app-shell"><aside className="sidebar"><div className="brand"><span className="brand-icon"><ShieldCheck/></span><span>BroCode<span className="dot">.</span></span></div><div className="workspace-label">WORKSPACE</div>
-  <div className={`nav-item ${!showAdminPanel?'active':''}`} onClick={()=>setShowAdminPanel(false)} style={{cursor:'pointer'}}><ClipboardList size={18}/> Applications</div>
-  {isOfficerOrAdmin&&<div className="nav-item"><Activity size={18}/> Officer overview</div>}
-  {isAdmin&&<div className={`nav-item ${showAdminPanel?'active':''}`} onClick={loadAdminUsers} style={{cursor:'pointer'}}><Users size={18}/> User management</div>}
-  <div className="side-note"><div className="side-note-icon"><ShieldCheck/></div><strong>Evidence-first review</strong><p>Automated checks support human scrutiny. They never replace an authorized decision.</p></div>
-  <div className="sidebar-bottom"><span className="avatar">{user.name?.[0]||'B'}</span><div className="user-label"><strong>{user.name}</strong><small>{user.role} access</small></div><button className="icon-btn" title="Sign out" onClick={logout}><LogOut size={17}/></button></div></aside>
+  return (
+    <div className="app-shell">
+      <aside className="sidebar">
+        <div className="brand">
+          <span className="brand-icon"><ShieldCheck/></span>
+          <span>BroCode<span className="dot">.</span></span>
+        </div>
+        <div className="workspace-label">WORKSPACE</div>
+        <div
+          className={`nav-item ${!showAdminPanel ? 'active' : ''}`}
+          onClick={() => setShowAdminPanel(false)}
+          style={{cursor: 'pointer'}}
+        >
+          <ClipboardList size={18}/> Applications
+        </div>
+        {isOfficerOrAdmin && (
+          <div className="nav-item">
+            <Activity size={18}/> Officer overview
+          </div>
+        )}
+        {isAdmin && (
+          <div
+            className={`nav-item ${showAdminPanel ? 'active' : ''}`}
+            onClick={loadAdminUsers}
+            style={{cursor: 'pointer'}}
+          >
+            <Users size={18}/> User management
+          </div>
+        )}
+        <div className="side-note">
+          <div className="side-note-icon"><ShieldCheck/></div>
+          <strong>Evidence-first review</strong>
+          <p>Automated checks support human scrutiny. They never replace an authorized decision.</p>
+        </div>
+        <div className="sidebar-bottom">
+          <span className="avatar">{user.name?.[0] || 'B'}</span>
+          <div className="user-label">
+            <strong>{user.name}</strong>
+            <small>{user.role} access</small>
+          </div>
+          <button className="icon-btn" title="Sign out" onClick={logout} aria-label="Sign out">
+            <LogOut size={17}/>
+          </button>
+        </div>
+      </aside>
 
-  <main className="main"><header className="topbar"><div><span className="crumb">Compliance workspace</span><span className="slash"> / </span><strong>{showAdminPanel?'User Management':selected?`Application #${selected.id}`:'Applications'}</strong></div><div className="top-actions"><span className="env-pill"><span/> DEMO ENVIRONMENT</span><button className="icon-btn" onClick={refresh} title="Refresh"><RefreshCw size={17}/></button></div></header>
-  <div className="content">
+      <main className="main">
+        <header className="topbar">
+          <div>
+            <span className="crumb">Compliance workspace</span>
+            <span className="slash"> / </span>
+            <strong>{showAdminPanel ? 'User Management' : selected ? `Application #${selected.id}` : 'Applications'}</strong>
+          </div>
+          <div className="top-actions">
+            <span className="env-pill"><span/> DEMO ENVIRONMENT</span>
+            <button className="icon-btn" onClick={refresh} title="Refresh"><RefreshCw size={17}/></button>
+          </div>
+        </header>
+        <div className="content">
 
   {/* ========== ADMIN USER MANAGEMENT ========== */}
   {showAdminPanel&&isAdmin&&<>
@@ -295,7 +368,7 @@ function App(){
 
   {/* --- Application List --- */}
   {!selected&&<><div className="stat-grid"><Stat icon={<FileText/>} label="Total applications" value={summary?.total_applications??apps.length} sub="All accessible records"/><Stat icon={<Clock3/>} label="Under review" value={apps.filter(a=>['UNDER_REVIEW','RECTIFICATION_SUBMITTED'].includes(a.status)).length} sub="Awaiting scrutiny"/><Stat icon={<AlertTriangle/>} label="Deficiency raised" value={apps.filter(a=>a.status==='DEFICIENCY_RAISED').length} sub="Action may be needed"/><Stat icon={<CheckCircle2/>} label="Closed" value={apps.filter(a=>a.status==='CLOSED').length} sub="Workflow closed"/></div>
-  <section className="panel"><div className="panel-heading"><div><h2>Applications</h2><p>Open a record to view documents and screening findings.</p></div><div style={{display:'flex',gap:'12px',alignItems:'center'}}>{isAdmin&&<label style={{display:'inline-flex',alignItems:'center',gap:'6px',fontSize:'11px',color:'#4a5568',cursor:'pointer'}}><input type="checkbox" checked={includeDrafts} onChange={e=>setIncludeDrafts(e.target.checked)}/> Include Drafts (Oversight View)</label>}<div className="search-box"><Search size={16}/><span>Search coming soon</span></div></div></div>
+  <section className="panel"><div className="panel-heading"><div><h2>Applications</h2><p>Open a record to view documents and screening findings.</p></div><div style={{display:'flex',gap:'12px',alignItems:'center'}}><div className="search-box"><Search size={16}/><span>Search coming soon</span></div></div></div>
   {apps.length===0?<div className="empty"><div className="empty-icon"><Building2/></div><h3>No applications yet</h3><p>Create an application to begin document pre-screening.</p></div>:
   <div className="table-wrap"><table><thead><tr><th>INSTITUTION</th><th>APPLICATION TYPE</th><th>ACADEMIC YEAR</th><th>CYCLE</th><th>ASSIGNED OFFICER</th><th>STATUS</th><th></th></tr></thead><tbody>
   {apps.map(a=><tr key={a.id}><td><div className="inst"><span className="inst-icon"><Building2 size={17}/></span><span><strong>{a.institution_name}</strong><small>{a.institution_code||`Application #${a.id}`}</small></span></div></td><td>{a.application_type}</td><td>{a.academic_year}</td><td><span className="count-pill">v{a.submission_version||1}</span></td><td>{a.assigned_officer_name?<span style={{fontSize:'10px',color:'#3a4d70'}}><UserCheck size={13}/> {a.assigned_officer_name}</span>:a.assigned_officer_id?<span style={{fontSize:'10px',color:'#3a4d70'}}><UserCheck size={13}/> Officer #{a.assigned_officer_id}</span>:<span style={{fontSize:'10px',color:'#97a1b2'}}>Unassigned</span>}</td><td><Status value={a.status}/></td><td><div style={{display:'flex',gap:'6px',alignItems:'center',justifyContent:'flex-end'}}><button className="row-link" onClick={()=>openApp(a)}>Review <ArrowUpRight size={15}/></button>{isInstitution&&a.status==='DRAFT'&&<button className="row-link" onClick={(e)=>{e.stopPropagation();deleteDraft(a.id)}} title="Delete draft application" style={{color:'#c04848'}}><Trash2 size={14}/></button>}</div></td></tr>)}
@@ -628,7 +701,119 @@ function App(){
   )}
 
   {/* --- Deficiency Memo --- */}
-  {isOfficerOrAdmin&&<section className="panel"><div className="panel-heading"><div><h2>Deficiency memo assistant</h2><p>Optional Gemini-generated draft based only on current findings.</p></div>{(isAssignedOfficer||isAdmin)&&<button className="secondary" onClick={generateMemo} disabled={busy}>Generate draft</button>}</div>{memo?<pre className="memo">{memo}</pre>:<div className="memo-placeholder">AI output is a draft only. Configure GEMINI_API_KEY on the backend to enable it; otherwise the app explains why it is unavailable.</div>}</section>}
+  {isOfficerOrAdmin && (
+    <section className="panel">
+      <div className="panel-heading">
+        <div>
+          <h2>Deficiency memo assistant</h2>
+          <p>AI-assisted pre-screening memorandum grounded strictly in recorded application findings.</p>
+        </div>
+        <div style={{display:'flex',gap:'8px',alignItems:'center'}}>
+          {memo && (
+            <div style={{display:'inline-flex',borderRadius:'6px',border:'1px solid #dfe4ef',overflow:'hidden',background:'#fff'}}>
+              <button
+                type="button"
+                onClick={()=>setMemoViewMode('formatted')}
+                style={{border:'none',padding:'6px 11px',fontSize:'11px',fontWeight:'600',background:memoViewMode==='formatted'?'#5968f3':'#fff',color:memoViewMode==='formatted'?'#fff':'#4a5568',cursor:'pointer'}}
+              >
+                Formatted
+              </button>
+              <button
+                type="button"
+                onClick={()=>setMemoViewMode('raw')}
+                style={{border:'none',borderLeft:'1px solid #dfe4ef',padding:'6px 11px',fontSize:'11px',fontWeight:'600',background:memoViewMode==='raw'?'#5968f3':'#fff',color:memoViewMode==='raw'?'#fff':'#4a5568',cursor:'pointer'}}
+              >
+                Markdown
+              </button>
+            </div>
+          )}
+          {memo && (
+            <button
+              className="secondary"
+              onClick={copyMemo}
+              title="Copy memorandum text to clipboard"
+              style={{display:'inline-flex',alignItems:'center',gap:'6px',height:'33px',fontSize:'11px',padding:'0 10px'}}
+            >
+              {copied ? <Check size={14} style={{color:'#23895a'}}/> : <Copy size={14}/>}
+              <span>{copied ? 'Copied' : 'Copy'}</span>
+            </button>
+          )}
+          {(isAssignedOfficer || isAdmin) && (
+            <button className="primary" onClick={generateMemo} disabled={busy || currentStatus === 'DRAFT'} style={{height:'33px',fontSize:'11px'}}>
+              {busy ? 'Compiling…' : memo ? 'Regenerate draft' : 'Generate draft'}
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div style={{padding:'20px'}}>
+        {isOfficer && !isAssignedOfficer && !isAdmin && (
+          <div style={{display:'flex',alignItems:'center',gap:'8px',padding:'10px 14px',background:'#f8fafc',border:'1px solid #e2e8f0',borderRadius:'8px',marginBottom:'14px',fontSize:'11px',color:'#64748b'}}>
+            <Info size={16} style={{color:'#3b82f6',flexShrink:0}}/>
+            <span>
+              {isUnassignedOfficer
+                ? 'Claim assignment on this application to generate or issue an official deficiency memorandum draft.'
+                : `Assigned compliance officer (${assignedOfficerName || `Officer #${assignedOfficerId}`}) or administrator is authorized to generate draft memoranda.`}
+            </span>
+          </div>
+        )}
+
+        {memo ? (
+          <div>
+            {(memoData?.is_fallback || (memoData && !memoData.ai_assisted)) ? (
+              <div style={{display:'flex',alignItems:'flex-start',gap:'10px',padding:'12px 16px',background:'#fffbeb',border:'1px solid #fef3c7',borderRadius:'8px',marginBottom:'16px',fontSize:'12px',color:'#92400e'}}>
+                <AlertTriangle size={18} style={{flexShrink:0,marginTop:'2px',color:'#d97706'}}/>
+                <div>
+                  <strong>Deterministic System Compiled Draft</strong>
+                  <div style={{margin:'2px 0 0',color:'#b45309',fontSize:'11px'}}>
+                    {memoData?.fallback_reason ? `Notice: ${memoData.fallback_reason}. ` : ''}
+                    Compiled deterministically from recorded findings without generative AI. All findings and grounded correction guidelines remain fully auditable.
+                  </div>
+                </div>
+              </div>
+            ) : (memoData && memoData.ai_assisted && !memoData.is_fallback) ? (
+              <div style={{display:'flex',alignItems:'flex-start',gap:'10px',padding:'12px 16px',background:'#f0fdf4',border:'1px solid #dcfce7',borderRadius:'8px',marginBottom:'16px',fontSize:'12px',color:'#166534'}}>
+                <CheckCircle2 size={18} style={{flexShrink:0,marginTop:'2px',color:'#16a34a'}}/>
+                <div>
+                  <strong>AI-Assisted Pre-Screening Draft ({memoData.model_used || 'Gemini'})</strong>
+                  <div style={{margin:'2px 0 0',color:'#15803d',fontSize:'11px'}}>
+                    Drafted strictly against verified pre-screening findings. Requires designated compliance officer scrutiny and validation before issuance.
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            {memoViewMode === 'formatted' ? (
+              <MemoRenderer content={memo} />
+            ) : (
+              <pre className="memo" style={{borderRadius:'8px',border:'1px solid #e2e8f0',background:'#f8fafc',padding:'16px',fontSize:'11px',lineHeight:'1.7'}}>{memo}</pre>
+            )}
+
+            <div style={{marginTop:'16px',padding:'12px 16px',background:'#f8fafc',border:'1px solid #e2e8f0',borderRadius:'8px',fontSize:'11px',color:'#64748b',display:'flex',alignItems:'center',gap:'10px'}}>
+              <ShieldCheck size={18} style={{color:'#6366f1',flexShrink:0}}/>
+              <span>
+                <strong>Regulatory Notice: </strong>
+                {memoData?.disclaimer || 'AI-assisted pre-screening decision-support draft. Does not constitute an official AICTE regulatory decision, approval, or deficiency notice. Authorized compliance officer scrutiny, verification, and signature are mandatory.'}
+              </span>
+            </div>
+          </div>
+        ) : (
+          <div className="memo-placeholder" style={{padding:'28px 16px',textAlign:'center',background:'#f8fafc',borderRadius:'8px',border:'1px dashed #cbd5e1'}}>
+            <div style={{display:'inline-flex',width:'40px',height:'40px',background:'#eff6ff',color:'#3b82f6',borderRadius:'10px',alignItems:'center',justifyContent:'center',marginBottom:'10px'}}>
+              <FileText size={20}/>
+            </div>
+            <h3 style={{fontSize:'13px',fontWeight:'700',color:'#334155',margin:'0 0 4px'}}>No memorandum draft generated yet</h3>
+            <p style={{fontSize:'11.5px',color:'#64748b',maxWidth:'480px',margin:'0 auto 12px',lineHeight:'1.6'}}>
+              Click &quot;Generate draft&quot; to compile a grounded deficiency memorandum based on current pre-screening findings and application metadata.
+            </p>
+            <div style={{fontSize:'10.5px',color:'#94a3b8'}}>
+              ✨ Powered by Gemini 2.5 Flash with deterministic fallback · Strictly grounded in pre-screening findings
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
+  )}
 
   {/* Institution can view reviews/history read-only */}
   {isInstitution&&detail?.reviews?.length>0&&<section className="panel"><div className="panel-heading"><div><h2>Officer review history</h2><p>Review decisions and notes from compliance officers.</p></div><span className="count-pill">{detail.reviews.length} entries</span></div>
@@ -640,6 +825,7 @@ function App(){
   <div className="disclaimer"><ShieldCheck size={17}/><div><strong>Pre-screening only</strong><span>BroCode is a prototype decision-support tool. OCR, duplicate detection and AI-generated text are not proof of authenticity. No live AICTE API is connected; final regulatory decisions must be made by an authorized officer using applicable official sources.</span></div></div>
   <footer>© BroCode · SIH 26261 <span>Security-minded prototype · v1.2.0</span></footer>
   </div></main></div>
+  );
 }
 
 function Stat({icon,label,value,sub}){return <div className="stat"><div className="stat-top"><span>{label}</span><span className="stat-icon">{icon}</span></div><div className="stat-value">{value}</div><div className="stat-sub">{sub}</div></div>}
@@ -647,5 +833,152 @@ function Stat({icon,label,value,sub}){return <div className="stat"><div classNam
 function Status({value}){let c=value==='CLOSED'?'closed':value==='DEFICIENCY_RAISED'?'deficiency':value==='UNDER_REVIEW'?'review':value==='RECTIFICATION_SUBMITTED'?'submitted':value==='OFFICER_RECOMMENDATION_RECORDED'?'review':'draft';return <span className={`status ${c}`}><i/>{(value||'DRAFT').replaceAll('_',' ')}</span>}
 
 function Field({label,value}){return <div className="field"><span>{label}</span><strong>{value??'—'}</strong></div>}
+
+function renderInlineMarkdown(text) {
+  if (!text) return null;
+  const boldParts = [];
+  const boldRegex = /\*\*(.+?)\*\*/g;
+  let lastIdx = 0;
+  let match;
+  while ((match = boldRegex.exec(text)) !== null) {
+    if (match.index > lastIdx) {
+      boldParts.push({ text: text.substring(lastIdx, match.index), isBold: false });
+    }
+    boldParts.push({ text: match[1], isBold: true });
+    lastIdx = match.index + match[0].length;
+  }
+  if (lastIdx < text.length) {
+    boldParts.push({ text: text.substring(lastIdx), isBold: false });
+  }
+
+  return boldParts.map((bp, bIdx) => {
+    const raw = bp.text;
+    const italicParts = [];
+    const italicRegex = /(?:\*|_)([^*_]+)(?:\*|_)/g;
+    let lIdx = 0;
+    let iMatch;
+    while ((iMatch = italicRegex.exec(raw)) !== null) {
+      if (iMatch.index > lIdx) {
+        italicParts.push(raw.substring(lIdx, iMatch.index));
+      }
+      italicParts.push(<em key={iMatch.index} style={{fontStyle:'italic',color:'#4b5563'}}>{iMatch[1]}</em>);
+      lIdx = iMatch.index + iMatch[0].length;
+    }
+    if (lIdx < raw.length) {
+      italicParts.push(raw.substring(lIdx));
+    }
+
+    if (bp.isBold) {
+      return <strong key={bIdx} style={{fontWeight:'700',color:'#1e293b'}}>{italicParts}</strong>;
+    }
+    return <React.Fragment key={bIdx}>{italicParts}</React.Fragment>;
+  });
+}
+
+function MemoRenderer({ content }) {
+  if (!content) return null;
+  const lines = content.split('\n');
+  const elements = [];
+  let currentList = [];
+  let currentListType = null;
+
+  const flushList = () => {
+    if (currentList.length > 0) {
+      if (currentListType === 'ol') {
+        elements.push(
+          <ol key={`ol-${elements.length}`} style={{paddingLeft:'22px',margin:'8px 0',fontSize:'12px',lineHeight:'1.65',color:'#334155'}}>
+            {currentList.map((item, i) => <li key={i} style={{marginBottom:'5px'}}>{item}</li>)}
+          </ol>
+        );
+      } else {
+        elements.push(
+          <ul key={`ul-${elements.length}`} style={{paddingLeft:'22px',margin:'8px 0',fontSize:'12px',lineHeight:'1.65',color:'#334155'}}>
+            {currentList.map((item, i) => <li key={i} style={{marginBottom:'5px'}}>{item}</li>)}
+          </ul>
+        );
+      }
+      currentList = [];
+      currentListType = null;
+    }
+  };
+
+  lines.forEach((rawLine, index) => {
+    const trimmed = rawLine.trim();
+
+    if (!trimmed) {
+      flushList();
+      return;
+    }
+
+    if (trimmed === '---' || trimmed === '***') {
+      flushList();
+      elements.push(<hr key={`hr-${index}`} style={{border:'none',borderTop:'1px solid #e2e8f0',margin:'16px 0'}} />);
+      return;
+    }
+
+    if (trimmed.startsWith('# ')) {
+      flushList();
+      elements.push(<h2 key={`h2-${index}`} style={{fontSize:'16px',fontWeight:'800',color:'#1e293b',letterSpacing:'-0.3px',margin:'14px 0 8px'}}>{renderInlineMarkdown(trimmed.slice(2))}</h2>);
+      return;
+    }
+
+    if (trimmed.startsWith('## ')) {
+      flushList();
+      elements.push(<h3 key={`h3-${index}`} style={{fontSize:'14.5px',fontWeight:'700',color:'#1e293b',margin:'14px 0 6px'}}>{renderInlineMarkdown(trimmed.slice(3))}</h3>);
+      return;
+    }
+
+    if (trimmed.startsWith('### ')) {
+      flushList();
+      elements.push(<h4 key={`h4-${index}`} style={{fontSize:'13px',fontWeight:'700',color:'#334155',margin:'14px 0 6px',borderBottom:'1px solid #f1f5f9',paddingBottom:'4px'}}>{renderInlineMarkdown(trimmed.slice(4))}</h4>);
+      return;
+    }
+
+    if (trimmed.startsWith('#### ')) {
+      flushList();
+      elements.push(<h5 key={`h5-${index}`} style={{fontSize:'12px',fontWeight:'700',color:'#475569',margin:'10px 0 4px'}}>{renderInlineMarkdown(trimmed.slice(5))}</h5>);
+      return;
+    }
+
+    if (trimmed.startsWith('>')) {
+      flushList();
+      const quoteText = trimmed.replace(/^>\s*/, '');
+      elements.push(
+        <blockquote key={`bq-${index}`} style={{borderLeft:'3px solid #6366f1',background:'#f8fafc',padding:'8px 12px',margin:'6px 0',borderRadius:'0 6px 6px 0',fontSize:'11.5px',color:'#475569',lineHeight:'1.6'}}>
+          {renderInlineMarkdown(quoteText)}
+        </blockquote>
+      );
+      return;
+    }
+
+    // Unordered list item
+    if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
+      if (currentListType !== 'ul') flushList();
+      currentListType = 'ul';
+      currentList.push(renderInlineMarkdown(trimmed.slice(2)));
+      return;
+    }
+
+    // Ordered list item
+    const olMatch = trimmed.match(/^(\d+)\.\s+(.*)/);
+    if (olMatch) {
+      if (currentListType !== 'ol') flushList();
+      currentListType = 'ol';
+      currentList.push(renderInlineMarkdown(olMatch[2]));
+      return;
+    }
+
+    flushList();
+    elements.push(<p key={`p-${index}`} style={{margin:'6px 0',fontSize:'12px',lineHeight:'1.65',color:'#334155'}}>{renderInlineMarkdown(trimmed)}</p>);
+  });
+
+  flushList();
+
+  return (
+    <div className="memo-document" style={{background:'#ffffff',padding:'24px 28px',borderRadius:'10px',border:'1px solid #e2e8f0',boxShadow:'0 1px 3px rgba(0,0,0,0.03)'}}>
+      {elements}
+    </div>
+  );
+}
 
 createRoot(document.getElementById('root')).render(<App/>);
