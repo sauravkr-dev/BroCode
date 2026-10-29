@@ -41,3 +41,11 @@ Thumbs.db
 # Archives
 *.zip
 *.tar.gz
+
+# Test cache
+.pytest_cache/
+**/.pytest_cache/
+
+# Local databases
+brocode.db
+backend/brocode.db
