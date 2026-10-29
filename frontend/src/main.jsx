@@ -1,279 +1,279 @@
-import React,{useEffect,useState} from 'react';
-import{createRoot}from'react-dom/client';
-import{ShieldCheck,Building2,FileCheck2,ClipboardList,Search,Plus,LogOut,RefreshCw,AlertTriangle,CheckCircle2,Clock3,UploadCloud,ArrowUpRight,LockKeyhole,Activity,FileText,MessageSquare,Users,Eye,Download,UserCheck,UserX,Trash2,RefreshCcw,Info,Copy,Check}from'lucide-react';
-import'./style.css';
+import React, { useEffect, useState } from 'react';
+import { createRoot } from 'react-dom/client';
+import { ShieldCheck, Building2, FileCheck2, ClipboardList, Search, Plus, LogOut, RefreshCw, AlertTriangle, CheckCircle2, Clock3, UploadCloud, ArrowUpRight, LockKeyhole, Activity, FileText, MessageSquare, Users, Eye, Download, UserCheck, UserX, Trash2, RefreshCcw, Info, Copy, Check } from 'lucide-react';
+import './style.css';
 
-const DEMO={institution:['institution@example.com','DemoInstitution123!'],officer:['officer@example.com','DemoOfficer123!'],admin:['admin@example.com','DemoAdmin123!']};
+const DEMO = { institution: ['institution@example.com', 'DemoInstitution123!'], officer: ['officer@example.com', 'DemoOfficer123!'], admin: ['admin@example.com', 'DemoAdmin123!'] };
 
-function App(){
-  const[token,setToken]=useState(localStorage.getItem('bc_token')||'');
-  const[user,setUser]=useState(null);
-  const[apps,setApps]=useState([]);
-  const[selected,setSelected]=useState(null);
-  const[detail,setDetail]=useState(null);
-  const[summary,setSummary]=useState(null);
-  const[error,setError]=useState('');
-  const[successMsg,setSuccessMsg]=useState('');
-  const[busy,setBusy]=useState(false);
-  const[login,setLogin]=useState({email:DEMO.institution[0],password:DEMO.institution[1]});
-  const[form,setForm]=useState({institution_name:'',institution_code:'',application_type:'Extension of Approval',academic_year:'2026-27',programme:'',current_intake:'',proposed_intake:''});
-  const[memo,setMemo]=useState('');
-  const[memoData,setMemoData]=useState(null);
-  const[memoViewMode,setMemoViewMode]=useState('formatted');
-  const[copied,setCopied]=useState(false);
-  const[reviewNote,setReviewNote]=useState('');
-  const[reviewAction,setReviewAction]=useState('REVIEW_NOTE');
-  const[correctionInstructions,setCorrectionInstructions]=useState('');
-  const[findingRef,setFindingRef]=useState('');
-  const[adminUsers,setAdminUsers]=useState([]);
-  const[showAdminPanel,setShowAdminPanel]=useState(false);
-  const[officersList,setOfficersList]=useState([]);
-  const[selectedAssignee,setSelectedAssignee]=useState('');
+function App() {
+  const [token, setToken] = useState(localStorage.getItem('bc_token') || '');
+  const [user, setUser] = useState(null);
+  const [apps, setApps] = useState([]);
+  const [selected, setSelected] = useState(null);
+  const [detail, setDetail] = useState(null);
+  const [summary, setSummary] = useState(null);
+  const [error, setError] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [login, setLogin] = useState({ email: DEMO.institution[0], password: DEMO.institution[1] });
+  const [form, setForm] = useState({ institution_name: '', institution_code: '', application_type: 'Extension of Approval', academic_year: '2026-27', programme: '', current_intake: '', proposed_intake: '' });
+  const [memo, setMemo] = useState('');
+  const [memoData, setMemoData] = useState(null);
+  const [memoViewMode, setMemoViewMode] = useState('formatted');
+  const [copied, setCopied] = useState(false);
+  const [reviewNote, setReviewNote] = useState('');
+  const [reviewAction, setReviewAction] = useState('REVIEW_NOTE');
+  const [correctionInstructions, setCorrectionInstructions] = useState('');
+  const [findingRef, setFindingRef] = useState('');
+  const [adminUsers, setAdminUsers] = useState([]);
+  const [showAdminPanel, setShowAdminPanel] = useState(false);
+  const [officersList, setOfficersList] = useState([]);
+  const [selectedAssignee, setSelectedAssignee] = useState('');
 
-  async function api(path,opts={}){
-    const h={...(opts.headers||{})};
-    if(token)h.Authorization=`Bearer ${token}`;
-    if(opts.body&&!(opts.body instanceof FormData))h['Content-Type']='application/json';
-    const r=await fetch(path,{...opts,headers:h});
-    const data=await r.json().catch(()=>({detail:'Unexpected server response'}));
-    if(!r.ok)throw Error(data.detail||`Request failed (${r.status})`);
+  async function api(path, opts = {}) {
+    const h = { ...(opts.headers || {}) };
+    if (token) h.Authorization = `Bearer ${token}`;
+    if (opts.body && !(opts.body instanceof FormData)) h['Content-Type'] = 'application/json';
+    const r = await fetch(path, { ...opts, headers: h });
+    const data = await r.json().catch(() => ({ detail: 'Unexpected server response' }));
+    if (!r.ok) throw Error(data.detail || `Request failed (${r.status})`);
     return data;
   }
 
-  async function refresh(){
-    try{
-      const me=await api('/api/auth/me');
+  async function refresh() {
+    try {
+      const me = await api('/api/auth/me');
       setUser(me);
-      const a=await api('/api/applications');
+      const a = await api('/api/applications');
       setApps(a);
-      if(me.role!=='institution')setSummary(await api('/api/officer/summary'));
-      if(me.role==='admin'||me.role==='officer'){
-        const offs = await api('/api/officers').catch(()=>[]);
+      if (me.role !== 'institution') setSummary(await api('/api/officer/summary'));
+      if (me.role === 'admin' || me.role === 'officer') {
+        const offs = await api('/api/officers').catch(() => []);
         setOfficersList(offs);
       }
-    }catch(e){setError(e.message);setToken('');localStorage.removeItem('bc_token')}
+    } catch (e) { setError(e.message); setToken(''); localStorage.removeItem('bc_token') }
   }
 
-  useEffect(()=>{if(token)refresh()},[token]);
+  useEffect(() => { if (token) refresh() }, [token]);
 
-  async function signIn(e){
-    e.preventDefault();setBusy(true);setError('');setSuccessMsg('');
-    try{
-      const body=new URLSearchParams({username:login.email,password:login.password});
-      const r=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body});
-      const d=await r.json();
-      if(!r.ok)throw Error(d.detail||'Login failed');
-      localStorage.setItem('bc_token',d.access_token);
+  async function signIn(e) {
+    e.preventDefault(); setBusy(true); setError(''); setSuccessMsg('');
+    try {
+      const body = new URLSearchParams({ username: login.email, password: login.password });
+      const r = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body });
+      const d = await r.json();
+      if (!r.ok) throw Error(d.detail || 'Login failed');
+      localStorage.setItem('bc_token', d.access_token);
       setToken(d.access_token);
-    }catch(e){setError(e.message)}finally{setBusy(false)}
+    } catch (e) { setError(e.message) } finally { setBusy(false) }
   }
 
-  async function openApp(a){
-    setSelected(a);setDetail(null);setMemo('');setMemoData(null);setReviewNote('');setCorrectionInstructions('');setFindingRef('');setError('');
-    try{
-      const d=await api(`/api/applications/${a.id}`);
+  async function openApp(a) {
+    setSelected(a); setDetail(null); setMemo(''); setMemoData(null); setReviewNote(''); setCorrectionInstructions(''); setFindingRef(''); setError('');
+    try {
+      const d = await api(`/api/applications/${a.id}`);
       setDetail(d);
       setSelectedAssignee(d.application?.assigned_officer_id ? String(d.application.assigned_officer_id) : '');
-    }catch(e){setError(e.message)}
+    } catch (e) { setError(e.message) }
   }
 
-  async function createApp(e){
-    e.preventDefault();setBusy(true);setError('');setSuccessMsg('');
-    try{
-      const d=await api('/api/applications',{method:'POST',body:JSON.stringify({...form,current_intake:form.current_intake===''?null:Number(form.current_intake),proposed_intake:form.proposed_intake===''?null:Number(form.proposed_intake)})});
-      setForm({institution_name:'',institution_code:'',application_type:'Extension of Approval',academic_year:'2026-27',programme:'',current_intake:'',proposed_intake:''});
+  async function createApp(e) {
+    e.preventDefault(); setBusy(true); setError(''); setSuccessMsg('');
+    try {
+      const d = await api('/api/applications', { method: 'POST', body: JSON.stringify({ ...form, current_intake: form.current_intake === '' ? null : Number(form.current_intake), proposed_intake: form.proposed_intake === '' ? null : Number(form.proposed_intake) }) });
+      setForm({ institution_name: '', institution_code: '', application_type: 'Extension of Approval', academic_year: '2026-27', programme: '', current_intake: '', proposed_intake: '' });
       setSuccessMsg(`Draft application #${d.id} created successfully.`);
-      await refresh();await openApp(d);
-    }catch(e){setError(e.message)}finally{setBusy(false)}
+      await refresh(); await openApp(d);
+    } catch (e) { setError(e.message) } finally { setBusy(false) }
   }
 
-  async function deleteDraft(appId = selected?.id){
-    if(!appId)return;
+  async function deleteDraft(appId = selected?.id) {
+    if (!appId) return;
     const ok = window.confirm(
       "Are you sure you want to permanently delete this draft application?\n\nAll uploaded files, draft screening findings, and application data will be permanently removed. This action cannot be undone."
     );
-    if(!ok)return;
-    setBusy(true);setError('');setSuccessMsg('');
-    try{
-      const res = await api(`/api/applications/${appId}`, {method:'DELETE'});
+    if (!ok) return;
+    setBusy(true); setError(''); setSuccessMsg('');
+    try {
+      const res = await api(`/api/applications/${appId}`, { method: 'DELETE' });
       setSuccessMsg(res.message || 'Draft application deleted successfully.');
       setSelected(null);
       setDetail(null);
       await refresh();
-    }catch(e){setError(e.message)}finally{setBusy(false)}
+    } catch (e) { setError(e.message) } finally { setBusy(false) }
   }
 
-  async function upload(e){
-    const f=e.target.files?.[0];if(!f||!selected)return;
-    setBusy(true);setError('');setSuccessMsg('');
-    try{
-      const fd=new FormData();fd.append('file',f);
-      const res = await api(`/api/applications/${selected.id}/documents`,{method:'POST',body:fd});
+  async function upload(e) {
+    const f = e.target.files?.[0]; if (!f || !selected) return;
+    setBusy(true); setError(''); setSuccessMsg('');
+    try {
+      const fd = new FormData(); fd.append('file', f);
+      const res = await api(`/api/applications/${selected.id}/documents`, { method: 'POST', body: fd });
       setSuccessMsg(`Document '${res.filename}' uploaded and pre-screened.`);
-      await openApp(selected);await refresh();
-    }catch(e){setError(e.message)}finally{setBusy(false);e.target.value=''}
+      await openApp(selected); await refresh();
+    } catch (e) { setError(e.message) } finally { setBusy(false); e.target.value = '' }
   }
 
-  async function removeDoc(doc){
-    if(!selected || !doc)return;
+  async function removeDoc(doc) {
+    if (!selected || !doc) return;
     const ok = window.confirm(
       `Are you sure you want to remove '${doc.original_name}'?\n\nThis will safely remove the file and delete obsolete screening findings associated with it.`
     );
-    if(!ok)return;
-    setBusy(true);setError('');setSuccessMsg('');
-    try{
-      const res = await api(`/api/applications/${selected.id}/documents/${doc.id}`, {method:'DELETE'});
+    if (!ok) return;
+    setBusy(true); setError(''); setSuccessMsg('');
+    try {
+      const res = await api(`/api/applications/${selected.id}/documents/${doc.id}`, { method: 'DELETE' });
       setSuccessMsg(res.message || 'Document removed successfully.');
       await openApp(selected);
       await refresh();
-    }catch(e){setError(e.message)}finally{setBusy(false)}
+    } catch (e) { setError(e.message) } finally { setBusy(false) }
   }
 
-  async function replaceDoc(docId, e){
+  async function replaceDoc(docId, e) {
     const f = e.target.files?.[0];
-    if(!f || !selected || !docId)return;
-    setBusy(true);setError('');setSuccessMsg('');
-    try{
+    if (!f || !selected || !docId) return;
+    setBusy(true); setError(''); setSuccessMsg('');
+    try {
       const fd = new FormData();
       fd.append('file', f);
       const res = await api(`/api/applications/${selected.id}/documents/${docId}`, {
-        method:'PUT',
-        body:fd,
+        method: 'PUT',
+        body: fd,
       });
       setSuccessMsg(res.message || 'Document replaced and re-screened successfully.');
       await openApp(selected);
       await refresh();
-    }catch(e){setError(e.message)}finally{setBusy(false);e.target.value=''}
+    } catch (e) { setError(e.message) } finally { setBusy(false); e.target.value = '' }
   }
 
-  async function uploadOfficerEvidence(e){
-    const f=e.target.files?.[0];if(!f||!selected)return;
-    setBusy(true);setError('');setSuccessMsg('');
-    try{
-      const fd=new FormData();fd.append('file',f);
-      await api(`/api/applications/${selected.id}/officer-evidence`,{method:'POST',body:fd});
+  async function uploadOfficerEvidence(e) {
+    const f = e.target.files?.[0]; if (!f || !selected) return;
+    setBusy(true); setError(''); setSuccessMsg('');
+    try {
+      const fd = new FormData(); fd.append('file', f);
+      await api(`/api/applications/${selected.id}/officer-evidence`, { method: 'POST', body: fd });
       setSuccessMsg("Officer evidence attached and labeled separately.");
-      await openApp(selected);await refresh();
-    }catch(e){setError(e.message)}finally{setBusy(false);e.target.value=''}
+      await openApp(selected); await refresh();
+    } catch (e) { setError(e.message) } finally { setBusy(false); e.target.value = '' }
   }
 
-  async function downloadDoc(d){
-    try{
-      const res=await fetch(`/api/applications/${selected.id}/documents/${d.id}/download`,{
-        headers:{Authorization:`Bearer ${token}`}
+  async function downloadDoc(d) {
+    try {
+      const res = await fetch(`/api/applications/${selected.id}/documents/${d.id}/download`, {
+        headers: { Authorization: `Bearer ${token}` }
       });
-      if(!res.ok)throw new Error('Download failed: unauthorized or missing document');
-      const blob=await res.blob();
-      const url=window.URL.createObjectURL(blob);
-      const a=document.createElement('a');
-      a.href=url;
-      a.download=d.original_name;
+      if (!res.ok) throw new Error('Download failed: unauthorized or missing document');
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = d.original_name;
       document.body.appendChild(a);
       a.click();
       a.remove();
       window.URL.revokeObjectURL(url);
-    }catch(e){setError(e.message)}
+    } catch (e) { setError(e.message) }
   }
 
-  async function changeStatus(status){
-    setBusy(true);setError('');setSuccessMsg('');
-    try{
-      await api(`/api/applications/${selected.id}/status`,{method:'PATCH',body:JSON.stringify({status})});
-      setSuccessMsg(`Application status updated to ${status.replaceAll('_',' ')}.`);
+  async function changeStatus(status) {
+    setBusy(true); setError(''); setSuccessMsg('');
+    try {
+      await api(`/api/applications/${selected.id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) });
+      setSuccessMsg(`Application status updated to ${status.replaceAll('_', ' ')}.`);
       await refresh();
-      const a=apps.find(x=>x.id===selected.id)||selected;
-      await openApp({...a,status});
-    }catch(e){setError(e.message)}finally{setBusy(false)}
+      const a = apps.find(x => x.id === selected.id) || selected;
+      await openApp({ ...a, status });
+    } catch (e) { setError(e.message) } finally { setBusy(false) }
   }
 
-  async function claimApp(){
-    setBusy(true);setError('');setSuccessMsg('');
-    try{
-      await api(`/api/applications/${selected.id}/assign`,{method:'PATCH',body:JSON.stringify({officer_id:user.id})});
+  async function claimApp() {
+    setBusy(true); setError(''); setSuccessMsg('');
+    try {
+      await api(`/api/applications/${selected.id}/assign`, { method: 'PATCH', body: JSON.stringify({ officer_id: user.id }) });
       setSuccessMsg(`Application #${selected.id} assigned to you.`);
       await refresh();
       await openApp(selected);
-    }catch(e){setError(e.message)}finally{setBusy(false)}
+    } catch (e) { setError(e.message) } finally { setBusy(false) }
   }
 
-  async function releaseApp(){
+  async function releaseApp() {
     const ok = window.confirm("Release your assignment and return this application to the unassigned triage queue?");
-    if(!ok)return;
-    setBusy(true);setError('');setSuccessMsg('');
-    try{
-      await api(`/api/applications/${selected.id}/assign`,{method:'PATCH',body:JSON.stringify({officer_id:null})});
+    if (!ok) return;
+    setBusy(true); setError(''); setSuccessMsg('');
+    try {
+      await api(`/api/applications/${selected.id}/assign`, { method: 'PATCH', body: JSON.stringify({ officer_id: null }) });
       setSuccessMsg("Assignment released. Application returned to triage queue.");
       await refresh();
       await openApp(selected);
-    }catch(e){setError(e.message)}finally{setBusy(false)}
+    } catch (e) { setError(e.message) } finally { setBusy(false) }
   }
 
-  async function adminAssignOfficer(targetOfficerId){
-    setBusy(true);setError('');setSuccessMsg('');
-    try{
-      const res=await api(`/api/applications/${selected.id}/assign`,{
-        method:'PATCH',
-        body:JSON.stringify({officer_id: targetOfficerId ? Number(targetOfficerId) : null})
+  async function adminAssignOfficer(targetOfficerId) {
+    setBusy(true); setError(''); setSuccessMsg('');
+    try {
+      const res = await api(`/api/applications/${selected.id}/assign`, {
+        method: 'PATCH',
+        body: JSON.stringify({ officer_id: targetOfficerId ? Number(targetOfficerId) : null })
       });
       setSuccessMsg(res.assigned_officer_name ? `Application assigned to ${res.assigned_officer_name}.` : "Application unassigned and returned to triage queue.");
       await refresh();
       await openApp(selected);
-    }catch(e){setError(e.message)}finally{setBusy(false)}
+    } catch (e) { setError(e.message) } finally { setBusy(false) }
   }
 
-  async function submitReview(){
-    if(!reviewNote.trim())return;
+  async function submitReview() {
+    if (!reviewNote.trim()) return;
     setBusy(true);
-    try{
-      const refs = findingRef.split(',').map(s=>s.trim()).filter(Boolean);
-      await api(`/api/applications/${selected.id}/reviews`,{
-        method:'POST',
-        body:JSON.stringify({
-          action:reviewAction,
-          notes:reviewNote,
-          finding_references:refs,
-          correction_instructions:correctionInstructions,
+    try {
+      const refs = findingRef.split(',').map(s => s.trim()).filter(Boolean);
+      await api(`/api/applications/${selected.id}/reviews`, {
+        method: 'POST',
+        body: JSON.stringify({
+          action: reviewAction,
+          notes: reviewNote,
+          finding_references: refs,
+          correction_instructions: correctionInstructions,
         })
       });
-      setReviewNote('');setCorrectionInstructions('');setFindingRef('');
+      setReviewNote(''); setCorrectionInstructions(''); setFindingRef('');
       await openApp(selected);
-    }catch(e){setError(e.message)}finally{setBusy(false)}
+    } catch (e) { setError(e.message) } finally { setBusy(false) }
   }
 
-  async function generateMemo(){
-    if(!selected)return;
-    setBusy(true);setError('');setSuccessMsg('');
-    try{
-      const d=await api(`/api/applications/${selected.id}/memo`,{method:'POST'});
+  async function generateMemo() {
+    if (!selected) return;
+    setBusy(true); setError(''); setSuccessMsg('');
+    try {
+      const d = await api(`/api/applications/${selected.id}/memo`, { method: 'POST' });
       setMemo(d.memo);
       setMemoData(d);
-      if(d.is_fallback || !d.ai_assisted){
+      if (d.is_fallback || !d.ai_assisted) {
         setSuccessMsg(`Deficiency memorandum compiled via deterministic system fallback (${d.fallback_reason || 'AI unavailable'}).`);
       } else {
         setSuccessMsg(`AI deficiency memorandum draft generated successfully (${d.model_used || 'Gemini'}).`);
       }
-    }catch(e){
+    } catch (e) {
       setError(e.message);
-    }finally{
+    } finally {
       setBusy(false);
     }
   }
 
-  function copyMemo(){
-    if(!memo)return;
+  function copyMemo() {
+    if (!memo) return;
     navigator.clipboard.writeText(memo);
     setCopied(true);
-    setTimeout(()=>setCopied(false),2500);
+    setTimeout(() => setCopied(false), 2500);
   }
 
-  async function loadAdminUsers(){
-    try{const u=await api('/api/admin/users');setAdminUsers(u);setShowAdminPanel(true)}catch(e){setError(e.message)}
+  async function loadAdminUsers() {
+    try { const u = await api('/api/admin/users'); setAdminUsers(u); setShowAdminPanel(true) } catch (e) { setError(e.message) }
   }
 
-  function logout(){setToken('');setUser(null);setSelected(null);setDetail(null);setMemo('');setMemoData(null);setShowAdminPanel(false);localStorage.removeItem('bc_token')}
+  function logout() { setToken(''); setUser(null); setSelected(null); setDetail(null); setMemo(''); setMemoData(null); setShowAdminPanel(false); localStorage.removeItem('bc_token') }
 
   // --- Login Screen ---
-  if(!token||!user)return <main className="login-shell"><section className="login-hero"><div className="brand"><span className="brand-icon"><ShieldCheck/></span><span>BroCode<span className="dot">.</span></span></div><div className="hero-copy"><div className="eyebrow">SIH 26261 · REGULATORY TECHNOLOGY</div><h1>Compliance clarity.<br/><em>Evidence first.</em></h1><p>AI-assisted application pre-screening for institutions and compliance teams — with traceable findings and human-led decisions.</p><div className="hero-points"><span><CheckCircle2/> Evidence-linked checks</span><span><LockKeyhole/> Role-based workspaces</span><span><Activity/> Audit-aware workflow</span></div></div><div className="hero-foot">DEMO ENVIRONMENT <span>•</span> NOT AN OFFICIAL AICTE PORTAL</div></section><section className="login-panel"><form className="login-card" onSubmit={signIn}><div className="mini-icon"><LockKeyhole/></div><div className="eyebrow">SECURE WORKSPACE</div><h2>Welcome back</h2><p className="muted">Sign in to your compliance workspace.</p>{error&&<div className="error">{error}</div>}<label>Email address<input type="email" required value={login.email} onChange={e=>setLogin({...login,email:e.target.value})}/></label><label>Password<input type="password" required value={login.password} onChange={e=>setLogin({...login,password:e.target.value})}/></label><button className="primary full" disabled={busy}>{busy?'Signing in…':'Sign in securely'} <ArrowUpRight size={17}/></button><div className="demo-box"><strong>Demo accounts</strong><div className="demo-buttons">{Object.entries(DEMO).map(([role,v])=><button type="button" key={role} onClick={()=>setLogin({email:v[0],password:v[1]})}>{role}</button>)}</div><small>Demo users only. Change credentials before deployment.</small></div></form></section></main>;
+  if (!token || !user) return <main className="login-shell"><section className="login-hero"><div className="brand"><span className="brand-icon"><ShieldCheck /></span><span>BroCode<span className="dot">.</span></span></div><div className="hero-copy"><div className="eyebrow">SIH 26261 · REGULATORY TECHNOLOGY</div><h1>Compliance clarity.<br /><em>Evidence first.</em></h1><p>AI-assisted application pre-screening for institutions and compliance teams — with traceable findings and human-led decisions.</p><div className="hero-points"><span><CheckCircle2 /> Evidence-linked checks</span><span><LockKeyhole /> Role-based workspaces</span><span><Activity /> Audit-aware workflow</span></div></div><div className="hero-foot">DEMO ENVIRONMENT <span>•</span> NOT AN OFFICIAL AICTE PORTAL</div></section><section className="login-panel"><form className="login-card" onSubmit={signIn}><div className="mini-icon"><LockKeyhole /></div><div className="eyebrow">SECURE WORKSPACE</div><h2>Welcome back</h2><p className="muted">Sign in to your compliance workspace.</p>{error && <div className="error">{error}</div>}<label>Email address<input type="email" required value={login.email} onChange={e => setLogin({ ...login, email: e.target.value })} /></label><label>Password<input type="password" required value={login.password} onChange={e => setLogin({ ...login, password: e.target.value })} /></label><button className="primary full" disabled={busy}>{busy ? 'Signing in…' : 'Sign in securely'} <ArrowUpRight size={17} /></button><div className="demo-box"><strong>Demo accounts</strong><div className="demo-buttons">{Object.entries(DEMO).map(([role, v]) => <button type="button" key={role} onClick={() => setLogin({ email: v[0], password: v[1] })}>{role}</button>)}</div><small>Demo users only. Change credentials before deployment.</small></div></form></section></main>;
 
   const currentStatus = detail?.application?.status || selected?.status || 'DRAFT';
   const isInstitution = user.role === 'institution';
@@ -294,33 +294,33 @@ function App(){
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand">
-          <span className="brand-icon"><ShieldCheck/></span>
+          <span className="brand-icon"><ShieldCheck /></span>
           <span>BroCode<span className="dot">.</span></span>
         </div>
         <div className="workspace-label">WORKSPACE</div>
         <div
           className={`nav-item ${!showAdminPanel ? 'active' : ''}`}
           onClick={() => setShowAdminPanel(false)}
-          style={{cursor: 'pointer'}}
+          style={{ cursor: 'pointer' }}
         >
-          <ClipboardList size={18}/> Applications
+          <ClipboardList size={18} /> Applications
         </div>
         {isOfficerOrAdmin && (
           <div className="nav-item">
-            <Activity size={18}/> Officer overview
+            <Activity size={18} /> Officer overview
           </div>
         )}
         {isAdmin && (
           <div
             className={`nav-item ${showAdminPanel ? 'active' : ''}`}
             onClick={loadAdminUsers}
-            style={{cursor: 'pointer'}}
+            style={{ cursor: 'pointer' }}
           >
-            <Users size={18}/> User management
+            <Users size={18} /> User management
           </div>
         )}
         <div className="side-note">
-          <div className="side-note-icon"><ShieldCheck/></div>
+          <div className="side-note-icon"><ShieldCheck /></div>
           <strong>Evidence-first review</strong>
           <p>Automated checks support human scrutiny. They never replace an authorized decision.</p>
         </div>
@@ -331,7 +331,7 @@ function App(){
             <small>{user.role} access</small>
           </div>
           <button className="icon-btn" title="Sign out" onClick={logout} aria-label="Sign out">
-            <LogOut size={17}/>
+            <LogOut size={17} />
           </button>
         </div>
       </aside>
@@ -344,495 +344,495 @@ function App(){
             <strong>{showAdminPanel ? 'User Management' : selected ? `Application #${selected.id}` : 'Applications'}</strong>
           </div>
           <div className="top-actions">
-            <span className="env-pill"><span/> DEMO ENVIRONMENT</span>
-            <button className="icon-btn" onClick={refresh} title="Refresh"><RefreshCw size={17}/></button>
+            <span className="env-pill"><span /> DEMO ENVIRONMENT</span>
+            <button className="icon-btn" onClick={refresh} title="Refresh"><RefreshCw size={17} /></button>
           </div>
         </header>
         <div className="content">
 
-  {/* ========== ADMIN USER MANAGEMENT ========== */}
-  {showAdminPanel&&isAdmin&&<>
-    <div className="page-heading"><div><div className="eyebrow">ADMIN PANEL</div><h1>User Management</h1><p>Manage system users, roles, and access.</p></div><div className="heading-actions"><button className="secondary" onClick={()=>setShowAdminPanel(false)}>Back to applications</button></div></div>
-    <section className="panel"><div className="panel-heading"><div><h2>Registered Users</h2><p>All users in the system</p></div><span className="count-pill">{adminUsers.length} users</span></div>
-    <div className="table-wrap"><table><thead><tr><th>ID</th><th>EMAIL</th><th>NAME</th><th>ROLE</th><th>ACTIVE</th></tr></thead><tbody>
-    {adminUsers.map(u=><tr key={u.id}><td>{u.id}</td><td>{u.email}</td><td>{u.name}</td><td><span className={`status ${u.role==='admin'?'review':u.role==='officer'?'submitted':'draft'}`}><i/>{u.role}</span></td><td>{u.active?<span style={{color:'#23895a'}}>✓ Active</span>:<span style={{color:'#c04848'}}>✗ Inactive</span>}</td></tr>)}
-    </tbody></table></div></section>
-  </>}
+          {/* ========== ADMIN USER MANAGEMENT ========== */}
+          {showAdminPanel && isAdmin && <>
+            <div className="page-heading"><div><div className="eyebrow">ADMIN PANEL</div><h1>User Management</h1><p>Manage system users, roles, and access.</p></div><div className="heading-actions"><button className="secondary" onClick={() => setShowAdminPanel(false)}>Back to applications</button></div></div>
+            <section className="panel"><div className="panel-heading"><div><h2>Registered Users</h2><p>All users in the system</p></div><span className="count-pill">{adminUsers.length} users</span></div>
+              <div className="table-wrap"><table><thead><tr><th>ID</th><th>EMAIL</th><th>NAME</th><th>ROLE</th><th>ACTIVE</th></tr></thead><tbody>
+                {adminUsers.map(u => <tr key={u.id}><td>{u.id}</td><td>{u.email}</td><td>{u.name}</td><td><span className={`status ${u.role === 'admin' ? 'review' : u.role === 'officer' ? 'submitted' : 'draft'}`}><i />{u.role}</span></td><td>{u.active ? <span style={{ color: '#23895a' }}>✓ Active</span> : <span style={{ color: '#c04848' }}>✗ Inactive</span>}</td></tr>)}
+              </tbody></table></div></section>
+          </>}
 
-  {/* ========== MAIN APPLICATION VIEW ========== */}
-  {!showAdminPanel&&<>
-  <div className="page-heading"><div><div className="eyebrow">{isInstitution?'INSTITUTION PORTAL':isAdmin?'ADMIN OVERVIEW':'OFFICER REVIEW DESK'}</div><h1>{selected?selected.institution_name:'Application overview'}</h1><p>{selected?`Application #${selected.id} · ${selected.academic_year}`:'Track submissions, review screening signals, and keep every finding auditable.'}</p></div><div className="heading-actions">{selected&&<button className="secondary" onClick={()=>{setSelected(null);setDetail(null);setError('');setSuccessMsg('')}}>Back to list</button>}{isInstitution&&selected&&currentStatus==='DRAFT'&&<button className="secondary" onClick={()=>deleteDraft(selected.id)} disabled={busy} title="Permanently delete this draft application" style={{color:'#c04848',borderColor:'#ffd6d6',background:'#fff5f5'}}><Trash2 size={15}/> Delete draft</button>}{isInstitution&&!selected&&<button className="primary" onClick={()=>document.getElementById('new-app').scrollIntoView({behavior:'smooth'})}><Plus size={17}/> New application</button>}</div></div>
+          {/* ========== MAIN APPLICATION VIEW ========== */}
+          {!showAdminPanel && <>
+            <div className="page-heading"><div><div className="eyebrow">{isInstitution ? 'INSTITUTION PORTAL' : isAdmin ? 'ADMIN OVERVIEW' : 'OFFICER REVIEW DESK'}</div><h1>{selected ? selected.institution_name : 'Application overview'}</h1><p>{selected ? `Application #${selected.id} · ${selected.academic_year}` : 'Track submissions, review screening signals, and keep every finding auditable.'}</p></div><div className="heading-actions">{selected && <button className="secondary" onClick={() => { setSelected(null); setDetail(null); setError(''); setSuccessMsg('') }}>Back to list</button>}{isInstitution && selected && currentStatus === 'DRAFT' && <button className="secondary" onClick={() => deleteDraft(selected.id)} disabled={busy} title="Permanently delete this draft application" style={{ color: '#c04848', borderColor: '#ffd6d6', background: '#fff5f5' }}><Trash2 size={15} /> Delete draft</button>}{isInstitution && !selected && <button className="primary" onClick={() => document.getElementById('new-app').scrollIntoView({ behavior: 'smooth' })}><Plus size={17} /> New application</button>}</div></div>
 
-  {error&&<div className="error banner">{error}<button onClick={()=>setError('')}>Dismiss</button></div>}
-  {successMsg&&<div className="banner" style={{background:'#edfcf2',border:'1px solid #a3e6b9',color:'#1e6b37',padding:'10px 14px',borderRadius:'8px',marginBottom:'14px',fontSize:'12px',display:'flex',justifyContent:'space-between',alignItems:'center'}}><span>✓ {successMsg}</span><button onClick={()=>setSuccessMsg('')} style={{border:0,background:'none',color:'#1e6b37',cursor:'pointer',fontWeight:600}}>✕</button></div>}
+            {error && <div className="error banner">{error}<button onClick={() => setError('')}>Dismiss</button></div>}
+            {successMsg && <div className="banner" style={{ background: '#edfcf2', border: '1px solid #a3e6b9', color: '#1e6b37', padding: '10px 14px', borderRadius: '8px', marginBottom: '14px', fontSize: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}><span>✓ {successMsg}</span><button onClick={() => setSuccessMsg('')} style={{ border: 0, background: 'none', color: '#1e6b37', cursor: 'pointer', fontWeight: 600 }}>✕</button></div>}
 
-  {/* --- Application List --- */}
-  {!selected&&<><div className="stat-grid"><Stat icon={<FileText/>} label="Total applications" value={summary?.total_applications??apps.length} sub="All accessible records"/><Stat icon={<Clock3/>} label="Under review" value={apps.filter(a=>['UNDER_REVIEW','RECTIFICATION_SUBMITTED'].includes(a.status)).length} sub="Awaiting scrutiny"/><Stat icon={<AlertTriangle/>} label="Deficiency raised" value={apps.filter(a=>a.status==='DEFICIENCY_RAISED').length} sub="Action may be needed"/><Stat icon={<CheckCircle2/>} label="Closed" value={apps.filter(a=>a.status==='CLOSED').length} sub="Workflow closed"/></div>
-  <section className="panel"><div className="panel-heading"><div><h2>Applications</h2><p>Open a record to view documents and screening findings.</p></div><div style={{display:'flex',gap:'12px',alignItems:'center'}}><div className="search-box"><Search size={16}/><span>Search coming soon</span></div></div></div>
-  {apps.length===0?<div className="empty"><div className="empty-icon"><Building2/></div><h3>No applications yet</h3><p>Create an application to begin document pre-screening.</p></div>:
-  <div className="table-wrap"><table><thead><tr><th>INSTITUTION</th><th>APPLICATION TYPE</th><th>ACADEMIC YEAR</th><th>CYCLE</th><th>ASSIGNED OFFICER</th><th>STATUS</th><th></th></tr></thead><tbody>
-  {apps.map(a=><tr key={a.id}><td><div className="inst"><span className="inst-icon"><Building2 size={17}/></span><span><strong>{a.institution_name}</strong><small>{a.institution_code||`Application #${a.id}`}</small></span></div></td><td>{a.application_type}</td><td>{a.academic_year}</td><td><span className="count-pill">v{a.submission_version||1}</span></td><td>{a.assigned_officer_name?<span style={{fontSize:'10px',color:'#3a4d70'}}><UserCheck size={13}/> {a.assigned_officer_name}</span>:a.assigned_officer_id?<span style={{fontSize:'10px',color:'#3a4d70'}}><UserCheck size={13}/> Officer #{a.assigned_officer_id}</span>:<span style={{fontSize:'10px',color:'#97a1b2'}}>Unassigned</span>}</td><td><Status value={a.status}/></td><td><div style={{display:'flex',gap:'6px',alignItems:'center',justifyContent:'flex-end'}}><button className="row-link" onClick={()=>openApp(a)}>Review <ArrowUpRight size={15}/></button>{isInstitution&&a.status==='DRAFT'&&<button className="row-link" onClick={(e)=>{e.stopPropagation();deleteDraft(a.id)}} title="Delete draft application" style={{color:'#c04848'}}><Trash2 size={14}/></button>}</div></td></tr>)}
-  </tbody></table></div>}
-  </section>
+            {/* --- Application List --- */}
+            {!selected && <><div className="stat-grid"><Stat icon={<FileText />} label="Total applications" value={summary?.total_applications ?? apps.length} sub="All accessible records" /><Stat icon={<Clock3 />} label="Under review" value={apps.filter(a => ['UNDER_REVIEW', 'RECTIFICATION_SUBMITTED'].includes(a.status)).length} sub="Awaiting scrutiny" /><Stat icon={<AlertTriangle />} label="Deficiency raised" value={apps.filter(a => a.status === 'DEFICIENCY_RAISED').length} sub="Action may be needed" /><Stat icon={<CheckCircle2 />} label="Closed" value={apps.filter(a => a.status === 'CLOSED').length} sub="Workflow closed" /></div>
+              <section className="panel"><div className="panel-heading"><div><h2>Applications</h2><p>Open a record to view documents and screening findings.</p></div><div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}><div className="search-box"><Search size={16} /><span>Search coming soon</span></div></div></div>
+                {apps.length === 0 ? <div className="empty"><div className="empty-icon"><Building2 /></div><h3>No applications yet</h3><p>Create an application to begin document pre-screening.</p></div> :
+                  <div className="table-wrap"><table><thead><tr><th>INSTITUTION</th><th>APPLICATION TYPE</th><th>ACADEMIC YEAR</th><th>CYCLE</th><th>ASSIGNED OFFICER</th><th>STATUS</th><th></th></tr></thead><tbody>
+                    {apps.map(a => <tr key={a.id}><td><div className="inst"><span className="inst-icon"><Building2 size={17} /></span><span><strong>{a.institution_name}</strong><small>{a.institution_code || `Application #${a.id}`}</small></span></div></td><td>{a.application_type}</td><td>{a.academic_year}</td><td><span className="count-pill">v{a.submission_version || 1}</span></td><td>{a.assigned_officer_name ? <span style={{ fontSize: '10px', color: '#3a4d70' }}><UserCheck size={13} /> {a.assigned_officer_name}</span> : a.assigned_officer_id ? <span style={{ fontSize: '10px', color: '#3a4d70' }}><UserCheck size={13} /> Officer #{a.assigned_officer_id}</span> : <span style={{ fontSize: '10px', color: '#97a1b2' }}>Unassigned</span>}</td><td><Status value={a.status} /></td><td><div style={{ display: 'flex', gap: '6px', alignItems: 'center', justifyContent: 'flex-end' }}><button className="row-link" onClick={() => openApp(a)}>Review <ArrowUpRight size={15} /></button>{isInstitution && a.status === 'DRAFT' && <button className="row-link" onClick={(e) => { e.stopPropagation(); deleteDraft(a.id) }} title="Delete draft application" style={{ color: '#c04848' }}><Trash2 size={14} /></button>}</div></td></tr>)}
+                  </tbody></table></div>}
+              </section>
 
-  {/* --- Create Application (Institution only) --- */}
-  {isInstitution&&<section className="panel create-panel" id="new-app"><div className="panel-heading"><div><h2>Create application</h2><p>Enter the institution and programme details to start a screening record.</p></div><span className="step-badge">STEP 01</span></div><form className="form-grid" onSubmit={createApp}><label className="wide">Institution name *<input required minLength="2" value={form.institution_name} onChange={e=>setForm({...form,institution_name:e.target.value})} placeholder="Enter official institution name"/></label><label>Institution code<input value={form.institution_code} onChange={e=>setForm({...form,institution_code:e.target.value})} placeholder="If applicable"/></label><label>Application type<select value={form.application_type} onChange={e=>setForm({...form,application_type:e.target.value})}><option>Extension of Approval</option><option>New Institution</option><option>Introduction of Programme</option><option>Change in Intake</option><option>Other / Needs classification</option></select></label><label>Academic year<select value={form.academic_year} onChange={e=>setForm({...form,academic_year:e.target.value})}><option>2026-27</option><option>2025-26</option><option>2024-25</option></select></label><label>Programme / course<input value={form.programme} onChange={e=>setForm({...form,programme:e.target.value})} placeholder="e.g. Engineering and Technology"/></label><label>Current approved intake<input type="number" min="0" value={form.current_intake} onChange={e=>setForm({...form,current_intake:e.target.value})}/></label><label>Proposed intake<input type="number" min="0" value={form.proposed_intake} onChange={e=>setForm({...form,proposed_intake:e.target.value})}/></label><div className="wide form-bottom"><span>Rules remain illustrative until officially mapped and approved.</span><button className="primary" disabled={busy}>Create draft <ArrowUpRight size={16}/></button></div></form></section>}
-  </>}
+              {/* --- Create Application (Institution only) --- */}
+              {isInstitution && <section className="panel create-panel" id="new-app"><div className="panel-heading"><div><h2>Create application</h2><p>Enter the institution and programme details to start a screening record.</p></div><span className="step-badge">STEP 01</span></div><form className="form-grid" onSubmit={createApp}><label className="wide">Institution name *<input required minLength="2" value={form.institution_name} onChange={e => setForm({ ...form, institution_name: e.target.value })} placeholder="Enter official institution name" /></label><label>Institution code<input value={form.institution_code} onChange={e => setForm({ ...form, institution_code: e.target.value })} placeholder="If applicable" /></label><label>Application type<select value={form.application_type} onChange={e => setForm({ ...form, application_type: e.target.value })}><option>Extension of Approval</option><option>New Institution</option><option>Introduction of Programme</option><option>Change in Intake</option><option>Other / Needs classification</option></select></label><label>Academic year<select value={form.academic_year} onChange={e => setForm({ ...form, academic_year: e.target.value })}><option>2026-27</option><option>2025-26</option><option>2024-25</option></select></label><label>Programme / course<input value={form.programme} onChange={e => setForm({ ...form, programme: e.target.value })} placeholder="e.g. Engineering and Technology" /></label><label>Current approved intake<input type="number" min="0" value={form.current_intake} onChange={e => setForm({ ...form, current_intake: e.target.value })} /></label><label>Proposed intake<input type="number" min="0" value={form.proposed_intake} onChange={e => setForm({ ...form, proposed_intake: e.target.value })} /></label><div className="wide form-bottom"><span>Rules remain illustrative until officially mapped and approved.</span><button className="primary" disabled={busy}>Create draft <ArrowUpRight size={16} /></button></div></form></section>}
+            </>}
 
-  {/* --- Application Detail --- */}
-  {selected&&<>
-  <div className="detail-grid"><section className="panel"><div className="panel-heading"><div><h2>Application details</h2><p>Institution-submitted information</p></div><div style={{display:'flex',gap:'8px',alignItems:'center'}}>{isOfficer&&isUnassignedOfficer&&currentStatus!=='DRAFT'&&<button className="secondary" onClick={claimApp} disabled={busy} title="Claim assignment as reviewing officer"><UserCheck size={14}/> Claim assignment</button>}{isOfficer&&isAssignedOfficer&&<button className="secondary" onClick={releaseApp} disabled={busy} title="Release assignment back to triage queue"><UserX size={14}/> Release assignment</button>}<Status value={currentStatus}/></div></div><div className="detail-fields"><Field label="Institution code" value={detail?.application?.institution_code||'Not provided'}/><Field label="Application type" value={detail?.application?.application_type}/><Field label="Academic year" value={detail?.application?.academic_year}/><Field label="Submission Version" value={`Cycle v${detail?.application?.submission_version||1}`}/><Field label="Assigned Officer" value={assignedOfficerName?`${assignedOfficerName} (Officer #${assignedOfficerId})`:assignedOfficerId?`Officer #${assignedOfficerId}`:'Unassigned (Triage Queue)'}/><Field label="Programme / course" value={detail?.application?.programme||'Not provided'}/><Field label="Current intake" value={detail?.application?.current_intake??'Not provided'}/><Field label="Proposed intake" value={detail?.application?.proposed_intake??'Not provided'}/></div></section>
-  <section className="panel risk-panel"><div className="eyebrow">SCREENING TRIAGE</div><div className="risk-number">{detail?.risk_score??'—'}<small>/100</small></div><div className="risk-label">Heuristic review score</div><div className="risk-track"><span style={{width:`${detail?.risk_score||0}%`}}/></div><p>Not a probability of fraud and not an approval decision. Scores prioritize manual review only.</p><div className="manual-flag"><AlertTriangle size={17}/> Issuer verification not configured</div></section></div>
+            {/* --- Application Detail --- */}
+            {selected && <>
+              <div className="detail-grid"><section className="panel"><div className="panel-heading"><div><h2>Application details</h2><p>Institution-submitted information</p></div><div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>{isOfficer && isUnassignedOfficer && currentStatus !== 'DRAFT' && <button className="secondary" onClick={claimApp} disabled={busy} title="Claim assignment as reviewing officer"><UserCheck size={14} /> Claim assignment</button>}{isOfficer && isAssignedOfficer && <button className="secondary" onClick={releaseApp} disabled={busy} title="Release assignment back to triage queue"><UserX size={14} /> Release assignment</button>}<Status value={currentStatus} /></div></div><div className="detail-fields"><Field label="Institution code" value={detail?.application?.institution_code || 'Not provided'} /><Field label="Application type" value={detail?.application?.application_type} /><Field label="Academic year" value={detail?.application?.academic_year} /><Field label="Submission Version" value={`Cycle v${detail?.application?.submission_version || 1}`} /><Field label="Assigned Officer" value={assignedOfficerName ? `${assignedOfficerName} (Officer #${assignedOfficerId})` : assignedOfficerId ? `Officer #${assignedOfficerId}` : 'Unassigned (Triage Queue)'} /><Field label="Programme / course" value={detail?.application?.programme || 'Not provided'} /><Field label="Current intake" value={detail?.application?.current_intake ?? 'Not provided'} /><Field label="Proposed intake" value={detail?.application?.proposed_intake ?? 'Not provided'} /></div></section>
+                <section className="panel risk-panel"><div className="eyebrow">SCREENING TRIAGE</div><div className="risk-number">{detail?.risk_score ?? '—'}<small>/100</small></div><div className="risk-label">Heuristic review score</div><div className="risk-track"><span style={{ width: `${detail?.risk_score || 0}%` }} /></div><p>Not a probability of fraud and not an approval decision. Scores prioritize manual review only.</p><div className="manual-flag"><AlertTriangle size={17} /> Issuer verification not configured</div></section></div>
 
-  {/* --- Regulatory Pre-Screening & Compliance Limitations (Officer & Admin) --- */}
-  {isOfficerOrAdmin && (
-    <section className="panel" style={{borderLeft:'4px solid #3b82f6',background:'#f9fbff'}}>
-      <div className="panel-heading" style={{borderBottom:'1px solid #e5edf9',padding:'14px 20px'}}>
-        <div>
-          <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
-            <ShieldCheck size={16} color="#2563eb"/>
-            <strong style={{color:'#1e40af',fontSize:'13px'}}>Regulatory Pre-Screening & Compliance Limitations</strong>
-          </div>
-          <p style={{fontSize:'10px',color:'#475569',marginTop:'2px'}}>
-            Compliance boundaries and regulatory limitations for reviewing officers and administrators.
-          </p>
-        </div>
-        <span className="count-pill" style={{background:'#dbeafe',color:'#1e40af',fontWeight:700}}>PRE-SCREENING ONLY</span>
-      </div>
-      <div style={{padding:'12px 20px',fontSize:'11px',color:'#334155',display:'grid',gridTemplateColumns:'repeat(auto-fit, minmax(260px, 1fr))',gap:'14px'}}>
-        <div>
-          <div style={{fontWeight:700,color:'#0f172a',marginBottom:'3px',display:'flex',alignItems:'center',gap:'5px'}}>
-            <AlertTriangle size={13} color="#d97706"/> Automated Decision Support
-          </div>
-          <span style={{color:'#64748b',lineHeight:'1.5'}}>
-            OCR text extraction, heuristic triage scores, and SHA-256 duplicate detection assist manual scrutiny. They <strong>do not prove document authenticity</strong> or legal validity.
-          </span>
-        </div>
-        <div>
-          <div style={{fontWeight:700,color:'#0f172a',marginBottom:'3px',display:'flex',alignItems:'center',gap:'5px'}}>
-            <AlertTriangle size={13} color="#d97706"/> Live AICTE Integration: Not Configured
-          </div>
-          <span style={{color:'#64748b',lineHeight:'1.5'}}>
-            No live AICTE central API or issuer verification service is connected. Final compliance determinations require human scrutiny by an authorized regulatory officer.
-          </span>
-        </div>
-      </div>
-    </section>
-  )}
-
-  {/* --- Institution: Deficiency Notice & Instructions --- */}
-  {isInstitution&&currentStatus==='DEFICIENCY_RAISED'&&activeDeficiency&&(
-    <section className="panel" style={{borderLeft:'4px solid #b55c2c'}}>
-      <div className="panel-heading"><div><h2 style={{color:'#b55c2c'}}>Officer Deficiency Notice</h2><p>Review the officer observations and complete required rectifications</p></div><span className="count-pill" style={{background:'#fff0e8',color:'#b55c2c'}}>Deficiency Action Required</span></div>
-      <div style={{padding:'16px 20px'}}>
-        <div style={{marginBottom:'10px'}}><strong>Officer Observations:</strong><p style={{fontSize:'12px',color:'#35425e',margin:'4px 0'}}>{activeDeficiency.notes}</p></div>
-        {activeDeficiency.correction_instructions&&<div style={{marginBottom:'10px'}}><strong>Correction Instructions:</strong><p style={{fontSize:'12px',color:'#35425e',margin:'4px 0'}}>{activeDeficiency.correction_instructions}</p></div>}
-        {activeDeficiency.finding_references?.length>0&&<div><strong style={{fontSize:'10px',color:'#71809e',textTransform:'uppercase'}}>Cited Findings:</strong><div style={{display:'flex',gap:'6px',marginTop:'4px'}}>{activeDeficiency.finding_references.map(ref=><span key={ref} className="count-pill" style={{background:'#fff0e8',color:'#b55c2c'}}>{ref}</span>)}</div></div>}
-      </div>
-    </section>
-  )}
-
-  {/* --- Submission Version History --- */}
-  {detail?.submission_history?.length>0&&<section className="panel"><div className="panel-heading"><div><h2>Submission history</h2><p>Auditable version history of submissions and rectifications.</p></div><span className="count-pill">{detail.submission_history.length} cycles</span></div>
-  <div className="doc-list">{detail.submission_history.map(sh=><div className="doc-row" key={sh.version}><div className="doc-icon"><FileCheck2 size={17}/></div><div className="doc-info"><strong>{sh.stage} (Cycle v{sh.version})</strong><small>{sh.documents_count} document(s) uploaded in this submission cycle</small></div></div>)}</div>
-  </section>}
-
-  {/* --- Institution Documents --- */}
-  <section className="panel"><div className="panel-heading"><div><h2>Institution documents</h2><p>PDF, PNG, JPEG or WebP · Maximum 12 MB per file</p></div>
-  {isInstitution&&(currentStatus==='DRAFT'||currentStatus==='DEFICIENCY_RAISED'||currentStatus==='RECTIFICATION_SUBMITTED')&&<label className="upload-btn"><UploadCloud size={17}/> Upload document<input type="file" accept="application/pdf,image/png,image/jpeg,image/webp" onChange={upload} disabled={busy}/></label>}
-  </div>
-  {institutionDocs.length===0?<div className="upload-empty"><UploadCloud/><strong>No documents uploaded</strong><span>Upload a file to run local extraction and screening checks.</span></div>:
-  <div className="doc-list">{institutionDocs.map(d=><div className="doc-row" key={d.id}>
-    <div className="doc-icon"><FileText/></div>
-    <div className="doc-info">
-      <strong>{d.original_name}</strong>
-      <small>{d.doc_type} · v{d.submission_version||1} · {d.text_characters} chars · SHA-256 {d.sha256.slice(0,14)}… · {d.created_at?new Date(d.created_at).toLocaleDateString():''}</small>
-    </div>
-    <div style={{display:'flex',alignItems:'center',gap:'6px',flexWrap:'wrap'}}>
-      <button className="row-link" onClick={()=>downloadDoc(d)} title="Download document"><Download size={14}/> Download</button>
-      {isInstitution&&(currentStatus==='DRAFT'||currentStatus==='DEFICIENCY_RAISED')&&(
-        <>
-          <label className="row-link" style={{cursor:'pointer',display:'inline-flex',alignItems:'center',gap:'4px'}} title="Replace this document with a corrected file">
-            <RefreshCcw size={13}/> Replace
-            <input type="file" accept="application/pdf,image/png,image/jpeg,image/webp" style={{display:'none'}} onChange={e=>replaceDoc(d.id, e)} disabled={busy}/>
-          </label>
-          <button className="row-link" onClick={()=>removeDoc(d)} title="Remove document" style={{color:'#c04848'}}>
-            <Trash2 size={13}/> Remove
-          </button>
-        </>
-      )}
-      {isInstitution&&!['DRAFT','DEFICIENCY_RAISED'].includes(currentStatus)&&(
-        <span style={{fontSize:'10px',color:'#8490a6',fontStyle:'italic',padding:'0 4px'}}>Locked during review</span>
-      )}
-      <span className="manual-tag">{d.verification_status==='MANUAL_VERIFICATION_REQUIRED'?'Manual verification':d.verification_status}</span>
-    </div>
-  </div>)}</div>}
-  </section>
-
-  {/* --- Officer Evidence (separate from institution docs) --- */}
-  {isOfficerOrAdmin&&<section className="panel"><div className="panel-heading"><div><h2>Officer evidence attachments</h2><p>Evidence uploaded by reviewing officers — separate from institution documents.</p></div>
-  {isAssignedOfficer&&<label className="upload-btn"><Eye size={17}/> Attach evidence<input type="file" accept="application/pdf,image/png,image/jpeg,image/webp" onChange={uploadOfficerEvidence} disabled={busy}/></label>}
-  </div>
-  {officerDocs.length===0?<div className="upload-empty"><Eye/><strong>No officer evidence attached</strong><span>Attach supporting evidence for your review.</span></div>:
-  <div className="doc-list">{officerDocs.map(d=><div className="doc-row" key={d.id}><div className="doc-icon" style={{background:'#fff5e7',color:'#b47b2b'}}><Eye/></div><div className="doc-info"><strong>{d.original_name}</strong><small>Officer Evidence · {d.created_at?new Date(d.created_at).toLocaleDateString():''}</small></div><button className="row-link" onClick={()=>downloadDoc(d)} title="Download evidence" style={{marginRight:'10px'}}><Download size={14}/> Download</button><span className="manual-tag" style={{background:'#edf1ff',color:'#5666df'}}>Officer evidence</span></div>)}</div>}
-  </section>}
-
-  {/* --- Screening Findings --- */}
-  <section className="panel"><div className="panel-heading"><div><h2>Screening findings</h2><p>Each finding includes a reason and source label.</p></div><span className="count-pill">{detail?.findings?.length||0} findings</span></div>
-  {!detail?.findings?.length?<div className="empty compact"><p>Findings appear after a document is screened.</p></div>:
-  <div className="finding-list">{detail.findings.map(f=><div className="finding" key={f.id}><div className={`finding-icon ${['PASS','VERIFIED'].includes(f.result)?'good':['FAIL','FAILED_CHECK'].includes(f.result)?'bad':'warn'}`}>{['PASS','VERIFIED'].includes(f.result)?<CheckCircle2/>:<AlertTriangle/>}</div><div className="finding-body"><div className="finding-title"><strong>{f.rule_id}</strong>{f.document_id&&<small style={{color:'#98a2b3'}}>Doc #{f.document_id}</small>}<span className={`result ${f.result.toLowerCase()}`}>{f.result.replaceAll('_',' ')}</span><span className={`severity ${f.severity}`}>{f.severity}</span></div><p>{f.message}</p><small>Source: {f.source_reference}</small></div></div>)}</div>}
-  </section>
-
-  {/* --- Institution: Submit or Discard Draft --- */}
-  {isInstitution&&currentStatus==='DRAFT'&&(
-    <section className="panel"><div className="panel-heading"><div><h2>Submit or discard draft</h2><p>Submit for official compliance review once all documents are uploaded, or discard this draft.</p></div></div>
-    <div className="action-row" style={{display:'flex',gap:'12px',alignItems:'center'}}>
-      <button className="primary" onClick={()=>changeStatus('UNDER_REVIEW')} disabled={busy}>Submit for review <ArrowUpRight size={16}/></button>
-      <button type="button" className="secondary" onClick={()=>deleteDraft(selected.id)} disabled={busy} style={{color:'#c04848',borderColor:'#ffd6d6',background:'#fff5f5'}}><Trash2 size={15}/> Delete draft</button>
-    </div>
-    </section>
-  )}
-
-  {/* --- Institution: Submit Rectification --- */}
-  {isInstitution&&currentStatus==='DEFICIENCY_RAISED'&&<section className="panel"><div className="panel-heading"><div><h2>Respond to deficiency</h2><p>Upload corrected documents above, then submit your rectification cycle.</p></div></div><div className="action-row"><button className="primary" onClick={()=>changeStatus('RECTIFICATION_SUBMITTED')}>Submit rectification cycle <ArrowUpRight size={16}/></button></div></section>}
-
-  {/* --- Admin: Administrative Oversight & Officer Assignment --- */}
-  {isAdmin && (
-    <section className="panel">
-      <div className="panel-heading">
-        <div>
-          <h2>Administrative oversight & officer assignment</h2>
-          <p>Assign reviewing officers to applications and administer workflow governance.</p>
-        </div>
-        <span className="count-pill" style={{background:'#eef2f7',color:'#334155'}}>Admin Governance</span>
-      </div>
-      <div style={{padding:'16px 20px',display:'grid',gap:'16px'}}>
-        <div style={{display:'flex',flexWrap:'wrap',alignItems:'center',gap:'12px',background:'#f8fafc',padding:'14px 16px',borderRadius:'8px',border:'1px solid #e2e8f0'}}>
-          <div style={{minWidth:'200px'}}>
-            <span style={{fontSize:'10px',color:'#64748b',textTransform:'uppercase',fontWeight:700,display:'block',marginBottom:'3px'}}>
-              Assigned Compliance Officer
-            </span>
-            <strong style={{fontSize:'13px',color:'#0f172a'}}>
-              {assignedOfficerName ? `${assignedOfficerName} (Officer #${assignedOfficerId})` : assignedOfficerId ? `Officer #${assignedOfficerId}` : 'Unassigned (In Triage Queue)'}
-            </strong>
-          </div>
-          <div style={{display:'flex',alignItems:'center',gap:'8px',flexWrap:'wrap',marginLeft:'auto'}}>
-            <select
-              value={selectedAssignee}
-              onChange={e=>setSelectedAssignee(e.target.value)}
-              disabled={busy || currentStatus === 'DRAFT'}
-              style={{height:'36px',border:'1px solid #cbd5e1',borderRadius:'6px',padding:'0 10px',fontSize:'11px',background:'#fff'}}
-            >
-              <option value="">-- Select Officer --</option>
-              {officersList.map(o=>(
-                <option key={o.id} value={o.id}>{o.name} ({o.email})</option>
-              ))}
-            </select>
-            <button
-              type="button"
-              className="secondary"
-              onClick={()=>adminAssignOfficer(selectedAssignee)}
-              disabled={busy || !selectedAssignee || Number(selectedAssignee) === assignedOfficerId || currentStatus === 'DRAFT'}
-              title={currentStatus === 'DRAFT' ? "Draft applications cannot be assigned before institutional submission" : "Assign selected officer"}
-            >
-              <UserCheck size={14}/> {assignedOfficerId ? 'Reassign officer' : 'Assign officer'}
-            </button>
-            {assignedOfficerId && (
-              <button
-                type="button"
-                className="secondary"
-                onClick={()=>adminAssignOfficer(null)}
-                disabled={busy || currentStatus === 'DRAFT'}
-                style={{color:'#991b1b',borderColor:'#fecaca',background:'#fff5f5'}}
-                title="Unassign officer and return application to triage queue"
-              >
-                <UserX size={14}/> Unassign
-              </button>
-            )}
-          </div>
-        </div>
-        {currentStatus === 'DRAFT' && (
-          <div style={{fontSize:'11px',color:'#64748b',fontStyle:'italic'}}>
-            ℹ️ Draft application — institutional submission required before officer assignment.
-          </div>
-        )}
-
-        <div style={{display:'flex',flexWrap:'wrap',alignItems:'center',justifyContent:'space-between',gap:'10px',borderTop:'1px solid #e2e8f0',paddingTop:'12px'}}>
-          <div>
-            <strong style={{fontSize:'12px',color:'#1e293b'}}>Administrative Workflow Control</strong>
-            <p style={{fontSize:'11px',color:'#64748b',margin:'2px 0 0 0'}}>
-              Administrators manage lifecycle status when regulatory intervention or administrative closure is needed.
-            </p>
-          </div>
-          <div style={{display:'flex',gap:'8px',alignItems:'center'}}>
-            {currentStatus !== 'CLOSED' && currentStatus !== 'DRAFT' && (
-              <button
-                type="button"
-                className="secondary"
-                onClick={()=>{
-                  const ok = window.confirm("Administratively close this application workflow?");
-                  if(ok) changeStatus('CLOSED');
-                }}
-                disabled={busy}
-                style={{color:'#475569'}}
-              >
-                Close workflow (Admin override)
-              </button>
-            )}
-            {currentStatus === 'CLOSED' && (
-              <span style={{fontSize:'11px',color:'#64748b',fontWeight:600}}>
-                Workflow closed
-              </span>
-            )}
-          </div>
-        </div>
-      </div>
-    </section>
-  )}
-
-  {/* --- Officer: Officer Review Actions --- */}
-  {isOfficer && (
-    <section className="panel">
-      <div className="panel-heading">
-        <div>
-          <h2>Officer review actions</h2>
-          <p>
-            {isAssignedOfficer
-              ? 'Workflow transitions are logged and audit-trailed. This does not grant final AICTE approval.'
-              : isUnassignedOfficer
-                ? 'Application is currently unassigned. Claim assignment to perform review actions.'
-                : `Application is currently assigned to ${assignedOfficerName || `Officer #${assignedOfficerId}`}. Read-only view.`
-            }
-          </p>
-        </div>
-        {isAssignedOfficer && <span className="count-pill" style={{background:'#e0f2fe',color:'#0369a1'}}>Assigned Reviewer</span>}
-        {isUnassignedOfficer && (
-          <button className="primary" onClick={claimApp} disabled={busy || currentStatus === 'DRAFT'}>
-            <UserCheck size={14}/> Claim assignment
-          </button>
-        )}
-      </div>
-      {isAssignedOfficer ? (
-        <div className="action-row">
-          {currentStatus==='RECTIFICATION_SUBMITTED'&&<button className="secondary" onClick={()=>changeStatus('UNDER_REVIEW')} disabled={busy}>Resume review</button>}
-          {(currentStatus==='UNDER_REVIEW'||currentStatus==='RECTIFICATION_SUBMITTED')&&<button className="secondary warning-btn" onClick={()=>changeStatus('DEFICIENCY_RAISED')} disabled={busy}>Raise deficiency</button>}
-          {(currentStatus==='UNDER_REVIEW'||currentStatus==='RECTIFICATION_SUBMITTED')&&<button className="primary" onClick={()=>changeStatus('OFFICER_RECOMMENDATION_RECORDED')} disabled={busy}>Record recommendation</button>}
-          {(['UNDER_REVIEW','DEFICIENCY_RAISED','OFFICER_RECOMMENDATION_RECORDED'].includes(currentStatus))&&<button className="secondary" onClick={()=>changeStatus('CLOSED')} disabled={busy}>Close workflow</button>}
-        </div>
-      ) : (
-        <div style={{padding:'14px 20px',fontSize:'12px',color:'#64748b',background:'#f8fafc'}}>
-          {isUnassignedOfficer ? (
-            <div style={{display:'flex',alignItems:'center',gap:'8px'}}>
-              <AlertTriangle size={15} color="#eab308"/>
-              <span>This application is in the triage queue. <strong>Claim assignment</strong> above to update status, record observations, or request rectifications.</span>
-            </div>
-          ) : (
-            <div style={{display:'flex',alignItems:'center',gap:'8px'}}>
-              <LockKeyhole size={15} color="#94a3b8"/>
-              <span>Assigned to {assignedOfficerName || `Officer #${assignedOfficerId}`}. Only the assigned officer may advance workflow status or raise deficiencies.</span>
-            </div>
-          )}
-        </div>
-      )}
-    </section>
-  )}
-
-  {/* --- Officer Review Notes & Deficiency Form --- */}
-  {isOfficerOrAdmin && (
-    <section className="panel">
-      <div className="panel-heading">
-        <div>
-          <h2>{isAdmin ? 'Officer review observations history' : 'Review observations & deficiency instructions'}</h2>
-          <p>
-            {isAdmin
-              ? 'Compliance observations, deficiency notices, and recommendations recorded by assigned officers.'
-              : 'Record observations, cite deficient findings, and specify correction instructions.'}
-          </p>
-        </div>
-        {isAdmin && <span className="count-pill">Oversight View</span>}
-      </div>
-
-      {isAssignedOfficer && (
-        <div style={{padding:'15px 20px'}}>
-          <div style={{display:'flex',gap:'10px',marginBottom:'10px'}}>
-            <select value={reviewAction} onChange={e=>setReviewAction(e.target.value)} style={{height:'39px',border:'1px solid #e0e5ef',borderRadius:'8px',padding:'0 12px',fontSize:'11px',background:'#fff'}}>
-              <option value="REVIEW_NOTE">Review Note</option>
-              <option value="DEFICIENCY_REQUEST">Deficiency Request</option>
-              <option value="CORRECTION_ACCEPTED">Correction Accepted</option>
-              <option value="RECOMMENDATION">Recommendation</option>
-            </select>
-            <button className="primary" onClick={submitReview} disabled={busy||!reviewNote.trim()}>Submit observation <ArrowUpRight size={15}/></button>
-          </div>
-          <textarea value={reviewNote} onChange={e=>setReviewNote(e.target.value)} placeholder="Enter your review observations and findings notes..." rows={3} style={{width:'100%',border:'1px solid #e0e5ef',borderRadius:'8px',padding:'10px 12px',fontSize:'11px',fontFamily:'inherit',resize:'vertical',marginBottom:'10px'}}/>
-          {reviewAction==='DEFICIENCY_REQUEST'&&<div style={{display:'grid',gap:'8px',marginBottom:'10px'}}>
-            <input value={findingRef} onChange={e=>setFindingRef(e.target.value)} placeholder="Referenced finding IDs (comma-separated, e.g. DOC-001, DOC-003)" style={{height:'37px',border:'1px solid #e0e5ef',borderRadius:'8px',padding:'0 12px',fontSize:'11px'}}/>
-            <textarea value={correctionInstructions} onChange={e=>setCorrectionInstructions(e.target.value)} placeholder="Specific correction instructions for the institution (e.g. Upload notarized land lease agreement and revised faculty list)..." rows={2} style={{width:'100%',border:'1px solid #e0e5ef',borderRadius:'8px',padding:'8px 12px',fontSize:'11px',fontFamily:'inherit',resize:'vertical'}}/>
-          </div>}
-        </div>
-      )}
-
-      {isOfficer && !isAssignedOfficer && (
-        <div style={{padding:'14px 20px',fontSize:'11px',color:'#8490a6',background:'#f8fafc',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
-          <span>
-            {isUnassignedOfficer
-              ? 'Application is unassigned. Claim assignment to record compliance review observations or deficiency notices.'
-              : `Only the assigned compliance officer (${assignedOfficerName || `Officer #${assignedOfficerId}`}) may record observations or deficiency requests.`}
-          </span>
-          {isUnassignedOfficer && (
-            <button className="secondary" onClick={claimApp} disabled={busy || currentStatus === 'DRAFT'}>
-              <UserCheck size={13}/> Claim assignment
-            </button>
-          )}
-        </div>
-      )}
-
-      {isAdmin && (
-        <div style={{padding:'12px 20px',fontSize:'11px',color:'#64748b',background:'#f8fafc',borderBottom:'1px solid #edf0f6'}}>
-          ℹ️ Compliance observations and deficiency notices are recorded by assigned compliance officers during scrutiny. Administrators provide governance and assignment oversight.
-        </div>
-      )}
-
-      {/* Review history */}
-      {detail?.reviews?.length>0&&<div className="doc-list">{detail.reviews.map(r=><div className="doc-row" key={r.id}><div className="doc-icon" style={{background:r.action==='DEFICIENCY_REQUEST'||r.action==='DEFICIENCY_RAISED'?'#fff0e8':r.action==='RECOMMENDATION'?'#eaf8f0':'#f0f2ff',color:r.action==='DEFICIENCY_REQUEST'||r.action==='DEFICIENCY_RAISED'?'#b55c2c':r.action==='RECOMMENDATION'?'#26845a':'#6573f4'}}><MessageSquare size={17}/></div><div className="doc-info"><strong>{r.action.replaceAll('_',' ')}</strong><small>{r.notes}</small>{r.correction_instructions&&<small style={{color:'#b55c2c',marginTop:'2px'}}><strong>Instructions: </strong>{r.correction_instructions}</small>}{r.finding_references?.length>0&&<small style={{color:'#6876ee',marginTop:'2px'}}><strong>Cited findings: </strong>{r.finding_references.join(', ')}</small>}<small style={{color:'#98a2b3',marginTop:'4px'}}>{r.created_at?new Date(r.created_at).toLocaleString():''} · Officer #{r.officer_id}</small></div></div>)}</div>}
-      {(!detail?.reviews || detail.reviews.length===0) && (
-        <div style={{padding:'20px',textAlign:'center',fontSize:'11px',color:'#94a3b8'}}>No review observations recorded yet.</div>
-      )}
-    </section>
-  )}
-
-  {/* --- Deficiency Memo --- */}
-  {isOfficerOrAdmin && (
-    <section className="panel">
-      <div className="panel-heading">
-        <div>
-          <h2>Deficiency memo assistant</h2>
-          <p>AI-assisted pre-screening memorandum grounded strictly in recorded application findings.</p>
-        </div>
-        <div style={{display:'flex',gap:'8px',alignItems:'center'}}>
-          {memo && (
-            <div style={{display:'inline-flex',borderRadius:'6px',border:'1px solid #dfe4ef',overflow:'hidden',background:'#fff'}}>
-              <button
-                type="button"
-                onClick={()=>setMemoViewMode('formatted')}
-                style={{border:'none',padding:'6px 11px',fontSize:'11px',fontWeight:'600',background:memoViewMode==='formatted'?'#5968f3':'#fff',color:memoViewMode==='formatted'?'#fff':'#4a5568',cursor:'pointer'}}
-              >
-                Formatted
-              </button>
-              <button
-                type="button"
-                onClick={()=>setMemoViewMode('raw')}
-                style={{border:'none',borderLeft:'1px solid #dfe4ef',padding:'6px 11px',fontSize:'11px',fontWeight:'600',background:memoViewMode==='raw'?'#5968f3':'#fff',color:memoViewMode==='raw'?'#fff':'#4a5568',cursor:'pointer'}}
-              >
-                Markdown
-              </button>
-            </div>
-          )}
-          {memo && (
-            <button
-              className="secondary"
-              onClick={copyMemo}
-              title="Copy memorandum text to clipboard"
-              style={{display:'inline-flex',alignItems:'center',gap:'6px',height:'33px',fontSize:'11px',padding:'0 10px'}}
-            >
-              {copied ? <Check size={14} style={{color:'#23895a'}}/> : <Copy size={14}/>}
-              <span>{copied ? 'Copied' : 'Copy'}</span>
-            </button>
-          )}
-          {(isAssignedOfficer || isAdmin) && (
-            <button className="primary" onClick={generateMemo} disabled={busy || currentStatus === 'DRAFT'} style={{height:'33px',fontSize:'11px'}}>
-              {busy ? 'Compiling…' : memo ? 'Regenerate draft' : 'Generate draft'}
-            </button>
-          )}
-        </div>
-      </div>
-
-      <div style={{padding:'20px'}}>
-        {isOfficer && !isAssignedOfficer && !isAdmin && (
-          <div style={{display:'flex',alignItems:'center',gap:'8px',padding:'10px 14px',background:'#f8fafc',border:'1px solid #e2e8f0',borderRadius:'8px',marginBottom:'14px',fontSize:'11px',color:'#64748b'}}>
-            <Info size={16} style={{color:'#3b82f6',flexShrink:0}}/>
-            <span>
-              {isUnassignedOfficer
-                ? 'Claim assignment on this application to generate or issue an official deficiency memorandum draft.'
-                : `Assigned compliance officer (${assignedOfficerName || `Officer #${assignedOfficerId}`}) or administrator is authorized to generate draft memoranda.`}
-            </span>
-          </div>
-        )}
-
-        {memo ? (
-          <div>
-            {(memoData?.is_fallback || (memoData && !memoData.ai_assisted)) ? (
-              <div style={{display:'flex',alignItems:'flex-start',gap:'10px',padding:'12px 16px',background:'#fffbeb',border:'1px solid #fef3c7',borderRadius:'8px',marginBottom:'16px',fontSize:'12px',color:'#92400e'}}>
-                <AlertTriangle size={18} style={{flexShrink:0,marginTop:'2px',color:'#d97706'}}/>
-                <div>
-                  <strong>Deterministic System Compiled Draft</strong>
-                  <div style={{margin:'2px 0 0',color:'#b45309',fontSize:'11px'}}>
-                    {memoData?.fallback_reason ? `Notice: ${memoData.fallback_reason}. ` : ''}
-                    Compiled deterministically from recorded findings without generative AI. All findings and grounded correction guidelines remain fully auditable.
+              {/* --- Regulatory Pre-Screening & Compliance Limitations (Officer & Admin) --- */}
+              {isOfficerOrAdmin && (
+                <section className="panel" style={{ borderLeft: '4px solid #3b82f6', background: '#f9fbff' }}>
+                  <div className="panel-heading" style={{ borderBottom: '1px solid #e5edf9', padding: '14px 20px' }}>
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <ShieldCheck size={16} color="#2563eb" />
+                        <strong style={{ color: '#1e40af', fontSize: '13px' }}>Regulatory Pre-Screening & Compliance Limitations</strong>
+                      </div>
+                      <p style={{ fontSize: '10px', color: '#475569', marginTop: '2px' }}>
+                        Compliance boundaries and regulatory limitations for reviewing officers and administrators.
+                      </p>
+                    </div>
+                    <span className="count-pill" style={{ background: '#dbeafe', color: '#1e40af', fontWeight: 700 }}>PRE-SCREENING ONLY</span>
                   </div>
-                </div>
-              </div>
-            ) : (memoData && memoData.ai_assisted && !memoData.is_fallback) ? (
-              <div style={{display:'flex',alignItems:'flex-start',gap:'10px',padding:'12px 16px',background:'#f0fdf4',border:'1px solid #dcfce7',borderRadius:'8px',marginBottom:'16px',fontSize:'12px',color:'#166534'}}>
-                <CheckCircle2 size={18} style={{flexShrink:0,marginTop:'2px',color:'#16a34a'}}/>
-                <div>
-                  <strong>AI-Assisted Pre-Screening Draft ({memoData.model_used || 'Gemini'})</strong>
-                  <div style={{margin:'2px 0 0',color:'#15803d',fontSize:'11px'}}>
-                    Drafted strictly against verified pre-screening findings. Requires designated compliance officer scrutiny and validation before issuance.
+                  <div style={{ padding: '12px 20px', fontSize: '11px', color: '#334155', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '14px' }}>
+                    <div>
+                      <div style={{ fontWeight: 700, color: '#0f172a', marginBottom: '3px', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                        <AlertTriangle size={13} color="#d97706" /> Automated Decision Support
+                      </div>
+                      <span style={{ color: '#64748b', lineHeight: '1.5' }}>
+                        OCR text extraction, heuristic triage scores, and SHA-256 duplicate detection assist manual scrutiny. They <strong>do not prove document authenticity</strong> or legal validity.
+                      </span>
+                    </div>
+                    <div>
+                      <div style={{ fontWeight: 700, color: '#0f172a', marginBottom: '3px', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                        <AlertTriangle size={13} color="#d97706" /> Live AICTE Integration: Not Configured
+                      </div>
+                      <span style={{ color: '#64748b', lineHeight: '1.5' }}>
+                        No live AICTE central API or issuer verification service is connected. Final compliance determinations require human scrutiny by an authorized regulatory officer.
+                      </span>
+                    </div>
                   </div>
-                </div>
+                </section>
+              )}
+
+              {/* --- Institution: Deficiency Notice & Instructions --- */}
+              {isInstitution && currentStatus === 'DEFICIENCY_RAISED' && activeDeficiency && (
+                <section className="panel" style={{ borderLeft: '4px solid #b55c2c' }}>
+                  <div className="panel-heading"><div><h2 style={{ color: '#b55c2c' }}>Officer Deficiency Notice</h2><p>Review the officer observations and complete required rectifications</p></div><span className="count-pill" style={{ background: '#fff0e8', color: '#b55c2c' }}>Deficiency Action Required</span></div>
+                  <div style={{ padding: '16px 20px' }}>
+                    <div style={{ marginBottom: '10px' }}><strong>Officer Observations:</strong><p style={{ fontSize: '12px', color: '#35425e', margin: '4px 0' }}>{activeDeficiency.notes}</p></div>
+                    {activeDeficiency.correction_instructions && <div style={{ marginBottom: '10px' }}><strong>Correction Instructions:</strong><p style={{ fontSize: '12px', color: '#35425e', margin: '4px 0' }}>{activeDeficiency.correction_instructions}</p></div>}
+                    {activeDeficiency.finding_references?.length > 0 && <div><strong style={{ fontSize: '10px', color: '#71809e', textTransform: 'uppercase' }}>Cited Findings:</strong><div style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>{activeDeficiency.finding_references.map(ref => <span key={ref} className="count-pill" style={{ background: '#fff0e8', color: '#b55c2c' }}>{ref}</span>)}</div></div>}
+                  </div>
+                </section>
+              )}
+
+              {/* --- Submission Version History --- */}
+              {detail?.submission_history?.length > 0 && <section className="panel"><div className="panel-heading"><div><h2>Submission history</h2><p>Auditable version history of submissions and rectifications.</p></div><span className="count-pill">{detail.submission_history.length} cycles</span></div>
+                <div className="doc-list">{detail.submission_history.map(sh => <div className="doc-row" key={sh.version}><div className="doc-icon"><FileCheck2 size={17} /></div><div className="doc-info"><strong>{sh.stage} (Cycle v{sh.version})</strong><small>{sh.documents_count} document(s) uploaded in this submission cycle</small></div></div>)}</div>
+              </section>}
+
+              {/* --- Institution Documents --- */}
+              <section className="panel"><div className="panel-heading"><div><h2>Institution documents</h2><p>PDF, PNG, JPEG or WebP · Maximum 12 MB per file</p></div>
+                {isInstitution && (currentStatus === 'DRAFT' || currentStatus === 'DEFICIENCY_RAISED' || currentStatus === 'RECTIFICATION_SUBMITTED') && <label className="upload-btn"><UploadCloud size={17} /> Upload document<input type="file" accept="application/pdf,image/png,image/jpeg,image/webp" onChange={upload} disabled={busy} /></label>}
               </div>
-            ) : null}
+                {institutionDocs.length === 0 ? <div className="upload-empty"><UploadCloud /><strong>No documents uploaded</strong><span>Upload a file to run local extraction and screening checks.</span></div> :
+                  <div className="doc-list">{institutionDocs.map(d => <div className="doc-row" key={d.id}>
+                    <div className="doc-icon"><FileText /></div>
+                    <div className="doc-info">
+                      <strong>{d.original_name}</strong>
+                      <small>{d.doc_type} · v{d.submission_version || 1} · {d.text_characters} chars · SHA-256 {d.sha256.slice(0, 14)}… · {d.created_at ? new Date(d.created_at).toLocaleDateString() : ''}</small>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                      <button className="row-link" onClick={() => downloadDoc(d)} title="Download document"><Download size={14} /> Download</button>
+                      {isInstitution && (currentStatus === 'DRAFT' || currentStatus === 'DEFICIENCY_RAISED') && (
+                        <>
+                          <label className="row-link" style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px' }} title="Replace this document with a corrected file">
+                            <RefreshCcw size={13} /> Replace
+                            <input type="file" accept="application/pdf,image/png,image/jpeg,image/webp" style={{ display: 'none' }} onChange={e => replaceDoc(d.id, e)} disabled={busy} />
+                          </label>
+                          <button className="row-link" onClick={() => removeDoc(d)} title="Remove document" style={{ color: '#c04848' }}>
+                            <Trash2 size={13} /> Remove
+                          </button>
+                        </>
+                      )}
+                      {isInstitution && !['DRAFT', 'DEFICIENCY_RAISED'].includes(currentStatus) && (
+                        <span style={{ fontSize: '10px', color: '#8490a6', fontStyle: 'italic', padding: '0 4px' }}>Locked during review</span>
+                      )}
+                      <span className="manual-tag">{d.verification_status === 'MANUAL_VERIFICATION_REQUIRED' ? 'Manual verification' : d.verification_status}</span>
+                    </div>
+                  </div>)}</div>}
+              </section>
 
-            {memoViewMode === 'formatted' ? (
-              <MemoRenderer content={memo} />
-            ) : (
-              <pre className="memo" style={{borderRadius:'8px',border:'1px solid #e2e8f0',background:'#f8fafc',padding:'16px',fontSize:'11px',lineHeight:'1.7'}}>{memo}</pre>
-            )}
+              {/* --- Officer Evidence (separate from institution docs) --- */}
+              {isOfficerOrAdmin && <section className="panel"><div className="panel-heading"><div><h2>Officer evidence attachments</h2><p>Evidence uploaded by reviewing officers — separate from institution documents.</p></div>
+                {isAssignedOfficer && <label className="upload-btn"><Eye size={17} /> Attach evidence<input type="file" accept="application/pdf,image/png,image/jpeg,image/webp" onChange={uploadOfficerEvidence} disabled={busy} /></label>}
+              </div>
+                {officerDocs.length === 0 ? <div className="upload-empty"><Eye /><strong>No officer evidence attached</strong><span>Attach supporting evidence for your review.</span></div> :
+                  <div className="doc-list">{officerDocs.map(d => <div className="doc-row" key={d.id}><div className="doc-icon" style={{ background: '#fff5e7', color: '#b47b2b' }}><Eye /></div><div className="doc-info"><strong>{d.original_name}</strong><small>Officer Evidence · {d.created_at ? new Date(d.created_at).toLocaleDateString() : ''}</small></div><button className="row-link" onClick={() => downloadDoc(d)} title="Download evidence" style={{ marginRight: '10px' }}><Download size={14} /> Download</button><span className="manual-tag" style={{ background: '#edf1ff', color: '#5666df' }}>Officer evidence</span></div>)}</div>}
+              </section>}
 
-            <div style={{marginTop:'16px',padding:'12px 16px',background:'#f8fafc',border:'1px solid #e2e8f0',borderRadius:'8px',fontSize:'11px',color:'#64748b',display:'flex',alignItems:'center',gap:'10px'}}>
-              <ShieldCheck size={18} style={{color:'#6366f1',flexShrink:0}}/>
-              <span>
-                <strong>Regulatory Notice: </strong>
-                {memoData?.disclaimer || 'AI-assisted pre-screening decision-support draft. Does not constitute an official AICTE regulatory decision, approval, or deficiency notice. Authorized compliance officer scrutiny, verification, and signature are mandatory.'}
-              </span>
-            </div>
-          </div>
-        ) : (
-          <div className="memo-placeholder" style={{padding:'28px 16px',textAlign:'center',background:'#f8fafc',borderRadius:'8px',border:'1px dashed #cbd5e1'}}>
-            <div style={{display:'inline-flex',width:'40px',height:'40px',background:'#eff6ff',color:'#3b82f6',borderRadius:'10px',alignItems:'center',justifyContent:'center',marginBottom:'10px'}}>
-              <FileText size={20}/>
-            </div>
-            <h3 style={{fontSize:'13px',fontWeight:'700',color:'#334155',margin:'0 0 4px'}}>No memorandum draft generated yet</h3>
-            <p style={{fontSize:'11.5px',color:'#64748b',maxWidth:'480px',margin:'0 auto 12px',lineHeight:'1.6'}}>
-              Click &quot;Generate draft&quot; to compile a grounded deficiency memorandum based on current pre-screening findings and application metadata.
-            </p>
-            <div style={{fontSize:'10.5px',color:'#94a3b8'}}>
-              ✨ Powered by Gemini 2.5 Flash with deterministic fallback · Strictly grounded in pre-screening findings
-            </div>
-          </div>
-        )}
-      </div>
-    </section>
-  )}
+              {/* --- Screening Findings --- */}
+              <section className="panel"><div className="panel-heading"><div><h2>Screening findings</h2><p>Each finding includes a reason and source label.</p></div><span className="count-pill">{detail?.findings?.length || 0} findings</span></div>
+                {!detail?.findings?.length ? <div className="empty compact"><p>Findings appear after a document is screened.</p></div> :
+                  <div className="finding-list">{detail.findings.map(f => <div className="finding" key={f.id}><div className={`finding-icon ${['PASS', 'VERIFIED'].includes(f.result) ? 'good' : ['FAIL', 'FAILED_CHECK'].includes(f.result) ? 'bad' : 'warn'}`}>{['PASS', 'VERIFIED'].includes(f.result) ? <CheckCircle2 /> : <AlertTriangle />}</div><div className="finding-body"><div className="finding-title"><strong>{f.rule_id}</strong>{f.document_id && <small style={{ color: '#98a2b3' }}>Doc #{f.document_id}</small>}<span className={`result ${f.result.toLowerCase()}`}>{f.result.replaceAll('_', ' ')}</span><span className={`severity ${f.severity}`}>{f.severity}</span></div><p>{f.message}</p><small>Source: {f.source_reference}</small></div></div>)}</div>}
+              </section>
 
-  {/* Institution can view reviews/history read-only */}
-  {isInstitution&&detail?.reviews?.length>0&&<section className="panel"><div className="panel-heading"><div><h2>Officer review history</h2><p>Review decisions and notes from compliance officers.</p></div><span className="count-pill">{detail.reviews.length} entries</span></div>
-  <div className="doc-list">{detail.reviews.map(r=><div className="doc-row" key={r.id}><div className="doc-icon" style={{background:r.action==='DEFICIENCY_REQUEST'?'#fff0e8':r.action==='RECOMMENDATION'?'#eaf8f0':'#f0f2ff',color:r.action==='DEFICIENCY_REQUEST'?'#b55c2c':r.action==='RECOMMENDATION'?'#26845a':'#6573f4'}}><MessageSquare size={17}/></div><div className="doc-info"><strong>{r.action.replaceAll('_',' ')}</strong><small>{r.notes}</small>{r.correction_instructions&&<small style={{color:'#b55c2c',marginTop:'2px'}}><strong>Correction instructions: </strong>{r.correction_instructions}</small>}{r.finding_references?.length>0&&<small style={{color:'#6876ee',marginTop:'2px'}}><strong>Cited: </strong>{r.finding_references.join(', ')}</small>}<small style={{color:'#98a2b3',marginTop:'4px'}}>{r.created_at?new Date(r.created_at).toLocaleString():''}</small></div></div>)}</div>
-  </section>}
-  </>}
-  </>}
+              {/* --- Institution: Submit or Discard Draft --- */}
+              {isInstitution && currentStatus === 'DRAFT' && (
+                <section className="panel"><div className="panel-heading"><div><h2>Submit or discard draft</h2><p>Submit for official compliance review once all documents are uploaded, or discard this draft.</p></div></div>
+                  <div className="action-row" style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                    <button className="primary" onClick={() => changeStatus('UNDER_REVIEW')} disabled={busy}>Submit for review <ArrowUpRight size={16} /></button>
+                    <button type="button" className="secondary" onClick={() => deleteDraft(selected.id)} disabled={busy} style={{ color: '#c04848', borderColor: '#ffd6d6', background: '#fff5f5' }}><Trash2 size={15} /> Delete draft</button>
+                  </div>
+                </section>
+              )}
 
-  <div className="disclaimer"><ShieldCheck size={17}/><div><strong>Pre-screening only</strong><span>BroCode is a prototype decision-support tool. OCR, duplicate detection and AI-generated text are not proof of authenticity. No live AICTE API is connected; final regulatory decisions must be made by an authorized officer using applicable official sources.</span></div></div>
-  <footer>© BroCode · SIH 26261 <span>Security-minded prototype · v1.2.0</span></footer>
-  </div></main></div>
+              {/* --- Institution: Submit Rectification --- */}
+              {isInstitution && currentStatus === 'DEFICIENCY_RAISED' && <section className="panel"><div className="panel-heading"><div><h2>Respond to deficiency</h2><p>Upload corrected documents above, then submit your rectification cycle.</p></div></div><div className="action-row"><button className="primary" onClick={() => changeStatus('RECTIFICATION_SUBMITTED')}>Submit rectification cycle <ArrowUpRight size={16} /></button></div></section>}
+
+              {/* --- Admin: Administrative Oversight & Officer Assignment --- */}
+              {isAdmin && (
+                <section className="panel">
+                  <div className="panel-heading">
+                    <div>
+                      <h2>Administrative oversight & officer assignment</h2>
+                      <p>Assign reviewing officers to applications and administer workflow governance.</p>
+                    </div>
+                    <span className="count-pill" style={{ background: '#eef2f7', color: '#334155' }}>Admin Governance</span>
+                  </div>
+                  <div style={{ padding: '16px 20px', display: 'grid', gap: '16px' }}>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '12px', background: '#f8fafc', padding: '14px 16px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                      <div style={{ minWidth: '200px' }}>
+                        <span style={{ fontSize: '10px', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, display: 'block', marginBottom: '3px' }}>
+                          Assigned Compliance Officer
+                        </span>
+                        <strong style={{ fontSize: '13px', color: '#0f172a' }}>
+                          {assignedOfficerName ? `${assignedOfficerName} (Officer #${assignedOfficerId})` : assignedOfficerId ? `Officer #${assignedOfficerId}` : 'Unassigned (In Triage Queue)'}
+                        </strong>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginLeft: 'auto' }}>
+                        <select
+                          value={selectedAssignee}
+                          onChange={e => setSelectedAssignee(e.target.value)}
+                          disabled={busy || currentStatus === 'DRAFT'}
+                          style={{ height: '36px', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '0 10px', fontSize: '11px', background: '#fff' }}
+                        >
+                          <option value="">-- Select Officer --</option>
+                          {officersList.map(o => (
+                            <option key={o.id} value={o.id}>{o.name} ({o.email})</option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          className="secondary"
+                          onClick={() => adminAssignOfficer(selectedAssignee)}
+                          disabled={busy || !selectedAssignee || Number(selectedAssignee) === assignedOfficerId || currentStatus === 'DRAFT'}
+                          title={currentStatus === 'DRAFT' ? "Draft applications cannot be assigned before institutional submission" : "Assign selected officer"}
+                        >
+                          <UserCheck size={14} /> {assignedOfficerId ? 'Reassign officer' : 'Assign officer'}
+                        </button>
+                        {assignedOfficerId && (
+                          <button
+                            type="button"
+                            className="secondary"
+                            onClick={() => adminAssignOfficer(null)}
+                            disabled={busy || currentStatus === 'DRAFT'}
+                            style={{ color: '#991b1b', borderColor: '#fecaca', background: '#fff5f5' }}
+                            title="Unassign officer and return application to triage queue"
+                          >
+                            <UserX size={14} /> Unassign
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    {currentStatus === 'DRAFT' && (
+                      <div style={{ fontSize: '11px', color: '#64748b', fontStyle: 'italic' }}>
+                        ℹ️ Draft application — institutional submission required before officer assignment.
+                      </div>
+                    )}
+
+                    <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '10px', borderTop: '1px solid #e2e8f0', paddingTop: '12px' }}>
+                      <div>
+                        <strong style={{ fontSize: '12px', color: '#1e293b' }}>Administrative Workflow Control</strong>
+                        <p style={{ fontSize: '11px', color: '#64748b', margin: '2px 0 0 0' }}>
+                          Administrators manage lifecycle status when regulatory intervention or administrative closure is needed.
+                        </p>
+                      </div>
+                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                        {currentStatus !== 'CLOSED' && currentStatus !== 'DRAFT' && (
+                          <button
+                            type="button"
+                            className="secondary"
+                            onClick={() => {
+                              const ok = window.confirm("Administratively close this application workflow?");
+                              if (ok) changeStatus('CLOSED');
+                            }}
+                            disabled={busy}
+                            style={{ color: '#475569' }}
+                          >
+                            Close workflow (Admin override)
+                          </button>
+                        )}
+                        {currentStatus === 'CLOSED' && (
+                          <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 600 }}>
+                            Workflow closed
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </section>
+              )}
+
+              {/* --- Officer: Officer Review Actions --- */}
+              {isOfficer && (
+                <section className="panel">
+                  <div className="panel-heading">
+                    <div>
+                      <h2>Officer review actions</h2>
+                      <p>
+                        {isAssignedOfficer
+                          ? 'Workflow transitions are logged and audit-trailed. This does not grant final AICTE approval.'
+                          : isUnassignedOfficer
+                            ? 'Application is currently unassigned. Claim assignment to perform review actions.'
+                            : `Application is currently assigned to ${assignedOfficerName || `Officer #${assignedOfficerId}`}. Read-only view.`
+                        }
+                      </p>
+                    </div>
+                    {isAssignedOfficer && <span className="count-pill" style={{ background: '#e0f2fe', color: '#0369a1' }}>Assigned Reviewer</span>}
+                    {isUnassignedOfficer && (
+                      <button className="primary" onClick={claimApp} disabled={busy || currentStatus === 'DRAFT'}>
+                        <UserCheck size={14} /> Claim assignment
+                      </button>
+                    )}
+                  </div>
+                  {isAssignedOfficer ? (
+                    <div className="action-row">
+                      {currentStatus === 'RECTIFICATION_SUBMITTED' && <button className="secondary" onClick={() => changeStatus('UNDER_REVIEW')} disabled={busy}>Resume review</button>}
+                      {(currentStatus === 'UNDER_REVIEW' || currentStatus === 'RECTIFICATION_SUBMITTED') && <button className="secondary warning-btn" onClick={() => changeStatus('DEFICIENCY_RAISED')} disabled={busy}>Raise deficiency</button>}
+                      {(currentStatus === 'UNDER_REVIEW' || currentStatus === 'RECTIFICATION_SUBMITTED') && <button className="primary" onClick={() => changeStatus('OFFICER_RECOMMENDATION_RECORDED')} disabled={busy}>Record recommendation</button>}
+                      {(['UNDER_REVIEW', 'DEFICIENCY_RAISED', 'OFFICER_RECOMMENDATION_RECORDED'].includes(currentStatus)) && <button className="secondary" onClick={() => changeStatus('CLOSED')} disabled={busy}>Close workflow</button>}
+                    </div>
+                  ) : (
+                    <div style={{ padding: '14px 20px', fontSize: '12px', color: '#64748b', background: '#f8fafc' }}>
+                      {isUnassignedOfficer ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <AlertTriangle size={15} color="#eab308" />
+                          <span>This application is in the triage queue. <strong>Claim assignment</strong> above to update status, record observations, or request rectifications.</span>
+                        </div>
+                      ) : (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <LockKeyhole size={15} color="#94a3b8" />
+                          <span>Assigned to {assignedOfficerName || `Officer #${assignedOfficerId}`}. Only the assigned officer may advance workflow status or raise deficiencies.</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </section>
+              )}
+
+              {/* --- Officer Review Notes & Deficiency Form --- */}
+              {isOfficerOrAdmin && (
+                <section className="panel">
+                  <div className="panel-heading">
+                    <div>
+                      <h2>{isAdmin ? 'Officer review observations history' : 'Review observations & deficiency instructions'}</h2>
+                      <p>
+                        {isAdmin
+                          ? 'Compliance observations, deficiency notices, and recommendations recorded by assigned officers.'
+                          : 'Record observations, cite deficient findings, and specify correction instructions.'}
+                      </p>
+                    </div>
+                    {isAdmin && <span className="count-pill">Oversight View</span>}
+                  </div>
+
+                  {isAssignedOfficer && (
+                    <div style={{ padding: '15px 20px' }}>
+                      <div style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
+                        <select value={reviewAction} onChange={e => setReviewAction(e.target.value)} style={{ height: '39px', border: '1px solid #e0e5ef', borderRadius: '8px', padding: '0 12px', fontSize: '11px', background: '#fff' }}>
+                          <option value="REVIEW_NOTE">Review Note</option>
+                          <option value="DEFICIENCY_REQUEST">Deficiency Request</option>
+                          <option value="CORRECTION_ACCEPTED">Correction Accepted</option>
+                          <option value="RECOMMENDATION">Recommendation</option>
+                        </select>
+                        <button className="primary" onClick={submitReview} disabled={busy || !reviewNote.trim()}>Submit observation <ArrowUpRight size={15} /></button>
+                      </div>
+                      <textarea value={reviewNote} onChange={e => setReviewNote(e.target.value)} placeholder="Enter your review observations and findings notes..." rows={3} style={{ width: '100%', border: '1px solid #e0e5ef', borderRadius: '8px', padding: '10px 12px', fontSize: '11px', fontFamily: 'inherit', resize: 'vertical', marginBottom: '10px' }} />
+                      {reviewAction === 'DEFICIENCY_REQUEST' && <div style={{ display: 'grid', gap: '8px', marginBottom: '10px' }}>
+                        <input value={findingRef} onChange={e => setFindingRef(e.target.value)} placeholder="Referenced finding IDs (comma-separated, e.g. DOC-001, DOC-003)" style={{ height: '37px', border: '1px solid #e0e5ef', borderRadius: '8px', padding: '0 12px', fontSize: '11px' }} />
+                        <textarea value={correctionInstructions} onChange={e => setCorrectionInstructions(e.target.value)} placeholder="Specific correction instructions for the institution (e.g. Upload notarized land lease agreement and revised faculty list)..." rows={2} style={{ width: '100%', border: '1px solid #e0e5ef', borderRadius: '8px', padding: '8px 12px', fontSize: '11px', fontFamily: 'inherit', resize: 'vertical' }} />
+                      </div>}
+                    </div>
+                  )}
+
+                  {isOfficer && !isAssignedOfficer && (
+                    <div style={{ padding: '14px 20px', fontSize: '11px', color: '#8490a6', background: '#f8fafc', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <span>
+                        {isUnassignedOfficer
+                          ? 'Application is unassigned. Claim assignment to record compliance review observations or deficiency notices.'
+                          : `Only the assigned compliance officer (${assignedOfficerName || `Officer #${assignedOfficerId}`}) may record observations or deficiency requests.`}
+                      </span>
+                      {isUnassignedOfficer && (
+                        <button className="secondary" onClick={claimApp} disabled={busy || currentStatus === 'DRAFT'}>
+                          <UserCheck size={13} /> Claim assignment
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  {isAdmin && (
+                    <div style={{ padding: '12px 20px', fontSize: '11px', color: '#64748b', background: '#f8fafc', borderBottom: '1px solid #edf0f6' }}>
+                      ℹ️ Compliance observations and deficiency notices are recorded by assigned compliance officers during scrutiny. Administrators provide governance and assignment oversight.
+                    </div>
+                  )}
+
+                  {/* Review history */}
+                  {detail?.reviews?.length > 0 && <div className="doc-list">{detail.reviews.map(r => <div className="doc-row" key={r.id}><div className="doc-icon" style={{ background: r.action === 'DEFICIENCY_REQUEST' || r.action === 'DEFICIENCY_RAISED' ? '#fff0e8' : r.action === 'RECOMMENDATION' ? '#eaf8f0' : '#f0f2ff', color: r.action === 'DEFICIENCY_REQUEST' || r.action === 'DEFICIENCY_RAISED' ? '#b55c2c' : r.action === 'RECOMMENDATION' ? '#26845a' : '#6573f4' }}><MessageSquare size={17} /></div><div className="doc-info"><strong>{r.action.replaceAll('_', ' ')}</strong><small>{r.notes}</small>{r.correction_instructions && <small style={{ color: '#b55c2c', marginTop: '2px' }}><strong>Instructions: </strong>{r.correction_instructions}</small>}{r.finding_references?.length > 0 && <small style={{ color: '#6876ee', marginTop: '2px' }}><strong>Cited findings: </strong>{r.finding_references.join(', ')}</small>}<small style={{ color: '#98a2b3', marginTop: '4px' }}>{r.created_at ? new Date(r.created_at).toLocaleString() : ''} · Officer #{r.officer_id}</small></div></div>)}</div>}
+                  {(!detail?.reviews || detail.reviews.length === 0) && (
+                    <div style={{ padding: '20px', textAlign: 'center', fontSize: '11px', color: '#94a3b8' }}>No review observations recorded yet.</div>
+                  )}
+                </section>
+              )}
+
+              {/* --- Deficiency Memo --- */}
+              {isOfficerOrAdmin && (
+                <section className="panel">
+                  <div className="panel-heading">
+                    <div>
+                      <h2>Deficiency memo assistant</h2>
+                      <p>AI-assisted pre-screening memorandum grounded strictly in recorded application findings.</p>
+                    </div>
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                      {memo && (
+                        <div style={{ display: 'inline-flex', borderRadius: '6px', border: '1px solid #dfe4ef', overflow: 'hidden', background: '#fff' }}>
+                          <button
+                            type="button"
+                            onClick={() => setMemoViewMode('formatted')}
+                            style={{ border: 'none', padding: '6px 11px', fontSize: '11px', fontWeight: '600', background: memoViewMode === 'formatted' ? '#5968f3' : '#fff', color: memoViewMode === 'formatted' ? '#fff' : '#4a5568', cursor: 'pointer' }}
+                          >
+                            Formatted
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setMemoViewMode('raw')}
+                            style={{ border: 'none', borderLeft: '1px solid #dfe4ef', padding: '6px 11px', fontSize: '11px', fontWeight: '600', background: memoViewMode === 'raw' ? '#5968f3' : '#fff', color: memoViewMode === 'raw' ? '#fff' : '#4a5568', cursor: 'pointer' }}
+                          >
+                            Markdown
+                          </button>
+                        </div>
+                      )}
+                      {memo && (
+                        <button
+                          className="secondary"
+                          onClick={copyMemo}
+                          title="Copy memorandum text to clipboard"
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', height: '33px', fontSize: '11px', padding: '0 10px' }}
+                        >
+                          {copied ? <Check size={14} style={{ color: '#23895a' }} /> : <Copy size={14} />}
+                          <span>{copied ? 'Copied' : 'Copy'}</span>
+                        </button>
+                      )}
+                      {(isAssignedOfficer || isAdmin) && (
+                        <button className="primary" onClick={generateMemo} disabled={busy || currentStatus === 'DRAFT'} style={{ height: '33px', fontSize: '11px' }}>
+                          {busy ? 'Compiling…' : memo ? 'Regenerate draft' : 'Generate draft'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div style={{ padding: '20px' }}>
+                    {isOfficer && !isAssignedOfficer && !isAdmin && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 14px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', marginBottom: '14px', fontSize: '11px', color: '#64748b' }}>
+                        <Info size={16} style={{ color: '#3b82f6', flexShrink: 0 }} />
+                        <span>
+                          {isUnassignedOfficer
+                            ? 'Claim assignment on this application to generate or issue an official deficiency memorandum draft.'
+                            : `Assigned compliance officer (${assignedOfficerName || `Officer #${assignedOfficerId}`}) or administrator is authorized to generate draft memoranda.`}
+                        </span>
+                      </div>
+                    )}
+
+                    {memo ? (
+                      <div>
+                        {(memoData?.is_fallback || (memoData && !memoData.ai_assisted)) ? (
+                          <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', padding: '12px 16px', background: '#fffbeb', border: '1px solid #fef3c7', borderRadius: '8px', marginBottom: '16px', fontSize: '12px', color: '#92400e' }}>
+                            <AlertTriangle size={18} style={{ flexShrink: 0, marginTop: '2px', color: '#d97706' }} />
+                            <div>
+                              <strong>Deterministic System Compiled Draft</strong>
+                              <div style={{ margin: '2px 0 0', color: '#b45309', fontSize: '11px' }}>
+                                {memoData?.fallback_reason ? `Notice: ${memoData.fallback_reason}. ` : ''}
+                                Compiled deterministically from recorded findings without generative AI. All findings and grounded correction guidelines remain fully auditable.
+                              </div>
+                            </div>
+                          </div>
+                        ) : (memoData && memoData.ai_assisted && !memoData.is_fallback) ? (
+                          <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', padding: '12px 16px', background: '#f0fdf4', border: '1px solid #dcfce7', borderRadius: '8px', marginBottom: '16px', fontSize: '12px', color: '#166534' }}>
+                            <CheckCircle2 size={18} style={{ flexShrink: 0, marginTop: '2px', color: '#16a34a' }} />
+                            <div>
+                              <strong>AI-Assisted Pre-Screening Draft ({memoData.model_used || 'Gemini'})</strong>
+                              <div style={{ margin: '2px 0 0', color: '#15803d', fontSize: '11px' }}>
+                                Drafted strictly against verified pre-screening findings. Requires designated compliance officer scrutiny and validation before issuance.
+                              </div>
+                            </div>
+                          </div>
+                        ) : null}
+
+                        {memoViewMode === 'formatted' ? (
+                          <MemoRenderer content={memo} />
+                        ) : (
+                          <pre className="memo" style={{ borderRadius: '8px', border: '1px solid #e2e8f0', background: '#f8fafc', padding: '16px', fontSize: '11px', lineHeight: '1.7' }}>{memo}</pre>
+                        )}
+
+                        <div style={{ marginTop: '16px', padding: '12px 16px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', fontSize: '11px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          <ShieldCheck size={18} style={{ color: '#6366f1', flexShrink: 0 }} />
+                          <span>
+                            <strong>Regulatory Notice: </strong>
+                            {memoData?.disclaimer || 'AI-assisted pre-screening decision-support draft. Does not constitute an official AICTE regulatory decision, approval, or deficiency notice. Authorized compliance officer scrutiny, verification, and signature are mandatory.'}
+                          </span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="memo-placeholder" style={{ padding: '28px 16px', textAlign: 'center', background: '#f8fafc', borderRadius: '8px', border: '1px dashed #cbd5e1' }}>
+                        <div style={{ display: 'inline-flex', width: '40px', height: '40px', background: '#eff6ff', color: '#3b82f6', borderRadius: '10px', alignItems: 'center', justifyContent: 'center', marginBottom: '10px' }}>
+                          <FileText size={20} />
+                        </div>
+                        <h3 style={{ fontSize: '13px', fontWeight: '700', color: '#334155', margin: '0 0 4px' }}>No memorandum draft generated yet</h3>
+                        <p style={{ fontSize: '11.5px', color: '#64748b', maxWidth: '480px', margin: '0 auto 12px', lineHeight: '1.6' }}>
+                          Click &quot;Generate draft&quot; to compile a grounded deficiency memorandum based on current pre-screening findings and application metadata.
+                        </p>
+                        <div style={{ fontSize: '10.5px', color: '#94a3b8' }}>
+                          ✨ Powered by Gemini 3.5 Flash with deterministic fallback · Strictly grounded in pre-screening findings
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </section>
+              )}
+
+              {/* Institution can view reviews/history read-only */}
+              {isInstitution && detail?.reviews?.length > 0 && <section className="panel"><div className="panel-heading"><div><h2>Officer review history</h2><p>Review decisions and notes from compliance officers.</p></div><span className="count-pill">{detail.reviews.length} entries</span></div>
+                <div className="doc-list">{detail.reviews.map(r => <div className="doc-row" key={r.id}><div className="doc-icon" style={{ background: r.action === 'DEFICIENCY_REQUEST' ? '#fff0e8' : r.action === 'RECOMMENDATION' ? '#eaf8f0' : '#f0f2ff', color: r.action === 'DEFICIENCY_REQUEST' ? '#b55c2c' : r.action === 'RECOMMENDATION' ? '#26845a' : '#6573f4' }}><MessageSquare size={17} /></div><div className="doc-info"><strong>{r.action.replaceAll('_', ' ')}</strong><small>{r.notes}</small>{r.correction_instructions && <small style={{ color: '#b55c2c', marginTop: '2px' }}><strong>Correction instructions: </strong>{r.correction_instructions}</small>}{r.finding_references?.length > 0 && <small style={{ color: '#6876ee', marginTop: '2px' }}><strong>Cited: </strong>{r.finding_references.join(', ')}</small>}<small style={{ color: '#98a2b3', marginTop: '4px' }}>{r.created_at ? new Date(r.created_at).toLocaleString() : ''}</small></div></div>)}</div>
+              </section>}
+            </>}
+          </>}
+
+          <div className="disclaimer"><ShieldCheck size={17} /><div><strong>Pre-screening only</strong><span>BroCode is a prototype decision-support tool. OCR, duplicate detection and AI-generated text are not proof of authenticity. No live AICTE API is connected; final regulatory decisions must be made by an authorized officer using applicable official sources.</span></div></div>
+          <footer>© BroCode · SIH 26261 <span>Security-minded prototype · v1.2.0</span></footer>
+        </div></main></div>
   );
 }
 
-function Stat({icon,label,value,sub}){return <div className="stat"><div className="stat-top"><span>{label}</span><span className="stat-icon">{icon}</span></div><div className="stat-value">{value}</div><div className="stat-sub">{sub}</div></div>}
+function Stat({ icon, label, value, sub }) { return <div className="stat"><div className="stat-top"><span>{label}</span><span className="stat-icon">{icon}</span></div><div className="stat-value">{value}</div><div className="stat-sub">{sub}</div></div> }
 
-function Status({value}){let c=value==='CLOSED'?'closed':value==='DEFICIENCY_RAISED'?'deficiency':value==='UNDER_REVIEW'?'review':value==='RECTIFICATION_SUBMITTED'?'submitted':value==='OFFICER_RECOMMENDATION_RECORDED'?'review':'draft';return <span className={`status ${c}`}><i/>{(value||'DRAFT').replaceAll('_',' ')}</span>}
+function Status({ value }) { let c = value === 'CLOSED' ? 'closed' : value === 'DEFICIENCY_RAISED' ? 'deficiency' : value === 'UNDER_REVIEW' ? 'review' : value === 'RECTIFICATION_SUBMITTED' ? 'submitted' : value === 'OFFICER_RECOMMENDATION_RECORDED' ? 'review' : 'draft'; return <span className={`status ${c}`}><i />{(value || 'DRAFT').replaceAll('_', ' ')}</span> }
 
-function Field({label,value}){return <div className="field"><span>{label}</span><strong>{value??'—'}</strong></div>}
+function Field({ label, value }) { return <div className="field"><span>{label}</span><strong>{value ?? '—'}</strong></div> }
 
 function renderInlineMarkdown(text) {
   if (!text) return null;
@@ -861,7 +861,7 @@ function renderInlineMarkdown(text) {
       if (iMatch.index > lIdx) {
         italicParts.push(raw.substring(lIdx, iMatch.index));
       }
-      italicParts.push(<em key={iMatch.index} style={{fontStyle:'italic',color:'#4b5563'}}>{iMatch[1]}</em>);
+      italicParts.push(<em key={iMatch.index} style={{ fontStyle: 'italic', color: '#4b5563' }}>{iMatch[1]}</em>);
       lIdx = iMatch.index + iMatch[0].length;
     }
     if (lIdx < raw.length) {
@@ -869,7 +869,7 @@ function renderInlineMarkdown(text) {
     }
 
     if (bp.isBold) {
-      return <strong key={bIdx} style={{fontWeight:'700',color:'#1e293b'}}>{italicParts}</strong>;
+      return <strong key={bIdx} style={{ fontWeight: '700', color: '#1e293b' }}>{italicParts}</strong>;
     }
     return <React.Fragment key={bIdx}>{italicParts}</React.Fragment>;
   });
@@ -886,14 +886,14 @@ function MemoRenderer({ content }) {
     if (currentList.length > 0) {
       if (currentListType === 'ol') {
         elements.push(
-          <ol key={`ol-${elements.length}`} style={{paddingLeft:'22px',margin:'8px 0',fontSize:'12px',lineHeight:'1.65',color:'#334155'}}>
-            {currentList.map((item, i) => <li key={i} style={{marginBottom:'5px'}}>{item}</li>)}
+          <ol key={`ol-${elements.length}`} style={{ paddingLeft: '22px', margin: '8px 0', fontSize: '12px', lineHeight: '1.65', color: '#334155' }}>
+            {currentList.map((item, i) => <li key={i} style={{ marginBottom: '5px' }}>{item}</li>)}
           </ol>
         );
       } else {
         elements.push(
-          <ul key={`ul-${elements.length}`} style={{paddingLeft:'22px',margin:'8px 0',fontSize:'12px',lineHeight:'1.65',color:'#334155'}}>
-            {currentList.map((item, i) => <li key={i} style={{marginBottom:'5px'}}>{item}</li>)}
+          <ul key={`ul-${elements.length}`} style={{ paddingLeft: '22px', margin: '8px 0', fontSize: '12px', lineHeight: '1.65', color: '#334155' }}>
+            {currentList.map((item, i) => <li key={i} style={{ marginBottom: '5px' }}>{item}</li>)}
           </ul>
         );
       }
@@ -912,31 +912,31 @@ function MemoRenderer({ content }) {
 
     if (trimmed === '---' || trimmed === '***') {
       flushList();
-      elements.push(<hr key={`hr-${index}`} style={{border:'none',borderTop:'1px solid #e2e8f0',margin:'16px 0'}} />);
+      elements.push(<hr key={`hr-${index}`} style={{ border: 'none', borderTop: '1px solid #e2e8f0', margin: '16px 0' }} />);
       return;
     }
 
     if (trimmed.startsWith('# ')) {
       flushList();
-      elements.push(<h2 key={`h2-${index}`} style={{fontSize:'16px',fontWeight:'800',color:'#1e293b',letterSpacing:'-0.3px',margin:'14px 0 8px'}}>{renderInlineMarkdown(trimmed.slice(2))}</h2>);
+      elements.push(<h2 key={`h2-${index}`} style={{ fontSize: '16px', fontWeight: '800', color: '#1e293b', letterSpacing: '-0.3px', margin: '14px 0 8px' }}>{renderInlineMarkdown(trimmed.slice(2))}</h2>);
       return;
     }
 
     if (trimmed.startsWith('## ')) {
       flushList();
-      elements.push(<h3 key={`h3-${index}`} style={{fontSize:'14.5px',fontWeight:'700',color:'#1e293b',margin:'14px 0 6px'}}>{renderInlineMarkdown(trimmed.slice(3))}</h3>);
+      elements.push(<h3 key={`h3-${index}`} style={{ fontSize: '14.5px', fontWeight: '700', color: '#1e293b', margin: '14px 0 6px' }}>{renderInlineMarkdown(trimmed.slice(3))}</h3>);
       return;
     }
 
     if (trimmed.startsWith('### ')) {
       flushList();
-      elements.push(<h4 key={`h4-${index}`} style={{fontSize:'13px',fontWeight:'700',color:'#334155',margin:'14px 0 6px',borderBottom:'1px solid #f1f5f9',paddingBottom:'4px'}}>{renderInlineMarkdown(trimmed.slice(4))}</h4>);
+      elements.push(<h4 key={`h4-${index}`} style={{ fontSize: '13px', fontWeight: '700', color: '#334155', margin: '14px 0 6px', borderBottom: '1px solid #f1f5f9', paddingBottom: '4px' }}>{renderInlineMarkdown(trimmed.slice(4))}</h4>);
       return;
     }
 
     if (trimmed.startsWith('#### ')) {
       flushList();
-      elements.push(<h5 key={`h5-${index}`} style={{fontSize:'12px',fontWeight:'700',color:'#475569',margin:'10px 0 4px'}}>{renderInlineMarkdown(trimmed.slice(5))}</h5>);
+      elements.push(<h5 key={`h5-${index}`} style={{ fontSize: '12px', fontWeight: '700', color: '#475569', margin: '10px 0 4px' }}>{renderInlineMarkdown(trimmed.slice(5))}</h5>);
       return;
     }
 
@@ -944,7 +944,7 @@ function MemoRenderer({ content }) {
       flushList();
       const quoteText = trimmed.replace(/^>\s*/, '');
       elements.push(
-        <blockquote key={`bq-${index}`} style={{borderLeft:'3px solid #6366f1',background:'#f8fafc',padding:'8px 12px',margin:'6px 0',borderRadius:'0 6px 6px 0',fontSize:'11.5px',color:'#475569',lineHeight:'1.6'}}>
+        <blockquote key={`bq-${index}`} style={{ borderLeft: '3px solid #6366f1', background: '#f8fafc', padding: '8px 12px', margin: '6px 0', borderRadius: '0 6px 6px 0', fontSize: '11.5px', color: '#475569', lineHeight: '1.6' }}>
           {renderInlineMarkdown(quoteText)}
         </blockquote>
       );
@@ -969,16 +969,16 @@ function MemoRenderer({ content }) {
     }
 
     flushList();
-    elements.push(<p key={`p-${index}`} style={{margin:'6px 0',fontSize:'12px',lineHeight:'1.65',color:'#334155'}}>{renderInlineMarkdown(trimmed)}</p>);
+    elements.push(<p key={`p-${index}`} style={{ margin: '6px 0', fontSize: '12px', lineHeight: '1.65', color: '#334155' }}>{renderInlineMarkdown(trimmed)}</p>);
   });
 
   flushList();
 
   return (
-    <div className="memo-document" style={{background:'#ffffff',padding:'24px 28px',borderRadius:'10px',border:'1px solid #e2e8f0',boxShadow:'0 1px 3px rgba(0,0,0,0.03)'}}>
+    <div className="memo-document" style={{ background: '#ffffff', padding: '24px 28px', borderRadius: '10px', border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
       {elements}
     </div>
   );
 }
 
-createRoot(document.getElementById('root')).render(<App/>);
+createRoot(document.getElementById('root')).render(<App />);

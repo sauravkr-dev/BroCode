@@ -696,18 +696,20 @@ Pre-Screening Findings:
                 "model_used": None,
             }
 
-    max_total_budget = 18.0  # Total elapsed seconds budget for all attempts
+    
+    max_total_budget = 45.0  # Total time budget for all attempts
     max_retries = max(0, min(getattr(settings, "gemini_max_retries", 1), 2))
-    timeout_sec = float(getattr(settings, "gemini_timeout_seconds", 10.0))
+    timeout_sec = float(getattr(settings, "gemini_timeout_seconds", 30.0))
 
-    # Configure granular HTTPX timeout to prevent unbounded socket hangs
+    # Allow more time for Gemini to generate the memorandum.
     httpx_timeout = httpx.Timeout(
         timeout=timeout_sec,
-        connect=min(4.0, timeout_sec),
-        read=min(10.0, timeout_sec),
-        write=4.0,
-        pool=4.0,
+        connect=min(8.0, timeout_sec),
+        read=min(25.0, timeout_sec),
+        write=min(8.0, timeout_sec),
+        pool=min(8.0, timeout_sec),
     )
+
 
     final_fallback_reason = "Gemini API unavailable"
     model_idx = 0
@@ -736,7 +738,11 @@ Pre-Screening Findings:
                     headers=headers,
                     json={
                         "contents": [{"parts": [{"text": prompt}]}],
-                        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 3500},
+                        "generationConfig": {
+                            "temperature": 0.2,
+                            "maxOutputTokens": 3500,
+                            "thinkingConfig": {"thinkingLevel": "minimal"},
+                        },
                     },
                     timeout=httpx_timeout,
                 )
@@ -744,23 +750,77 @@ Pre-Screening Findings:
                 if r.status_code == 200:
                     data = r.json()
                     candidates = data.get("candidates", [])
+                    
+                if r.status_code == 200:
+                    data = r.json()
+                    candidates = data.get("candidates", [])
+
                     if not candidates:
-                        logger.warning("Gemini API model '%s' returned 200 with empty candidates", model_name)
-                        final_fallback_reason = f"Gemini API ({model_name}) returned an empty response"
+                        logger.warning(
+                            "Gemini API model '%s' returned 200 with empty candidates",
+                            model_name,
+                        )
+                        final_fallback_reason = (
+                            f"Gemini API ({model_name}) returned an empty response"
+                        )
                         break
 
                     candidate = candidates[0]
                     finish_reason = candidate.get("finishReason")
-                    parts = candidate.get("content", {}).get("parts", [])
-                    raw_text = parts[0].get("text", "") if parts else ""
 
-                    if finish_reason == "MAX_TOKENS" or len(raw_text.strip()) < 150:
+                    parts = candidate.get("content", {}).get("parts", [])
+                    raw_text = "\n".join(
+                        part.get("text", "")
+                        for part in parts
+                        if isinstance(part, dict) and part.get("text")
+                    ).strip()
+
+                    if finish_reason == "MAX_TOKENS" or len(raw_text) < 150:
                         logger.warning(
-                            "Gemini API model '%s' output incomplete (finishReason=%s, length=%d)",
-                            model_name, finish_reason, len(raw_text),
+                            "Gemini API model '%s' output incomplete "
+                            "(finishReason=%s, length=%d)",
+                            model_name,
+                            finish_reason,
+                            len(raw_text),
                         )
-                        final_fallback_reason = f"AI generation incomplete on model '{model_name}' ({finish_reason})"
+                        final_fallback_reason = (
+                            f"AI generation incomplete on model '{model_name}' "
+                            f"({finish_reason}, length={len(raw_text)})"
+                        )
+
+                        if (
+                            not is_last_attempt
+                            and (time.time() - start_time) < max_total_budget
+                        ):
+                            delay = _compute_backoff_delay(
+                                attempt, base=0.4, max_delay=1.5
+                            )
+                            sleep_fn(delay)
+                            continue
+
                         break
+
+                    cleaned_text = re.sub(
+                        r'[_—\-]{8,}', '________', raw_text
+                    ).strip()
+
+                    total_elapsed = time.time() - start_time
+                    logger.info(
+                        "Gemini memorandum generation succeeded using model '%s' (time: %.2fs)",
+                        model_name,
+                        total_elapsed,
+                    )
+                    return {
+                        "memo": cleaned_text,
+                        "ai_assisted": True,
+                        "is_fallback": False,
+                        "fallback_reason": None,
+                        "status": "success",
+                        "disclaimer": MEMO_DISCLAIMER,
+                        "model_used": model_name,
+                    }
+
+
 
                     cleaned_text = re.sub(r'[_—\-]{8,}', '________', raw_text).strip()
                     total_elapsed = time.time() - start_time
