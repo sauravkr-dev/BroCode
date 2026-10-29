@@ -15,9 +15,39 @@ from .config import settings
 
 RULE_FILE = Path(__file__).resolve().parents[1] / "rules" / "illustrative_2026_27.yaml"
 
+
 def load_rules():
+    """Load and validate the illustrative rule-pack configuration."""
+    if not RULE_FILE.is_file():
+        raise FileNotFoundError(
+            f"Rule pack file not found: {RULE_FILE}"
+        )
+
     with open(RULE_FILE, encoding="utf-8") as f:
-        return yaml.safe_load(f)
+        rules = yaml.safe_load(f)
+
+    if not isinstance(rules, dict):
+        raise ValueError("Rule pack must contain a YAML mapping.")
+
+    if not isinstance(rules.get("rules"), list):
+        raise ValueError("Rule pack must contain a 'rules' list.")
+
+    rule_ids = []
+    for rule in rules["rules"]:
+        if not isinstance(rule, dict):
+            raise ValueError("Each rule must be a YAML mapping.")
+
+        rule_id = rule.get("id")
+        if not isinstance(rule_id, str) or not rule_id.strip():
+            raise ValueError("Each rule must have a non-empty string ID.")
+
+        rule_ids.append(rule_id)
+
+    if len(rule_ids) != len(set(rule_ids)):
+        raise ValueError("Rule pack contains duplicate rule IDs.")
+
+    return rules
+
 
 def extract_text(path: Path, mime: str) -> str:
     text = ""
@@ -76,23 +106,23 @@ def store_findings(
         db.add(x)
         findings.append(x)
 
-    # DOC-001: Document classification check
+    # DOC-005: Document classification check
     if doc.doc_type != "Unclassified":
         add(
-            "DOC-001",
+            "DOC-005",
             "low",
             "VERIFIED",
             f"Document classified as '{doc.doc_type}'. Classification is heuristic and subject to officer review.",
-            "Illustrative rule pack: DOC-001",
+            "Illustrative rule pack: DOC-005",
             {"classified_type": doc.doc_type},
         )
     else:
         add(
-            "DOC-001",
+            "DOC-005",
             "medium",
             "NEEDS_REVIEW",
             "Document type could not be classified automatically from content or filename. Officer inspection required.",
-            "Illustrative rule pack: DOC-001",
+            "Illustrative rule pack: DOC-005",
             {"classified_type": "Unclassified"},
         )
 
