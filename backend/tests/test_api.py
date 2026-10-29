@@ -1849,11 +1849,11 @@ class TestDeficiencyMemoAssistant:
             },
             # 2. String evidence
             {
-                "rule_id": "DOC-001",
+                "rule_id": "DOC-005",
                 "severity": "low",
                 "result": "NEEDS_REVIEW",
                 "message": "Document classification requires manual verification",
-                "source_reference": "Illustrative rule pack: DOC-001",
+                "source_reference": "Illustrative rule pack: DOC-005",
                 "evidence": "Matched keywords: 'extension of approval', 'aicte approval'",
                 "document_id": 102,
             },
@@ -1907,7 +1907,7 @@ class TestDeficiencyMemoAssistant:
         assert "syllabus_duplicate.pdf" in fallback_text
         assert "Notarized Stamp Missing" in fallback_text
         assert "DOC-003" in fallback_text
-        assert "DOC-001" in fallback_text
+        assert "DOC-005" in fallback_text
 
     def test_format_evidence_text_helper_unit(self):
         from app.services import format_evidence_text
