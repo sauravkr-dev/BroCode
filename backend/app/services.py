@@ -13,11 +13,63 @@ from sqlalchemy.orm import Session
 from .models import Document, Finding
 from .config import settings
 
+logger = logging.getLogger("brocode.services")
 RULE_FILE = Path(__file__).resolve().parents[1] / "rules" / "illustrative_2026_27.yaml"
 
+
 def load_rules():
+    """Load and validate the illustrative rule-pack configuration."""
+    if not RULE_FILE.is_file():
+        raise FileNotFoundError(
+            f"Rule pack file not found: {RULE_FILE}"
+        )
+
     with open(RULE_FILE, encoding="utf-8") as f:
-        return yaml.safe_load(f)
+        rules = yaml.safe_load(f)
+
+    if not isinstance(rules, dict):
+        raise ValueError("Rule pack must contain a YAML mapping.")
+
+    if not isinstance(rules.get("rules"), list):
+        raise ValueError("Rule pack must contain a 'rules' list.")
+
+    rule_ids = []
+    for rule in rules["rules"]:
+        if not isinstance(rule, dict):
+            raise ValueError("Each rule must be a YAML mapping.")
+
+        rule_id = rule.get("id")
+        if not isinstance(rule_id, str) or not rule_id.strip():
+            raise ValueError("Each rule must have a non-empty string ID.")
+
+        rule_ids.append(rule_id)
+
+    if len(rule_ids) != len(set(rule_ids)):
+        raise ValueError("Rule pack contains duplicate rule IDs.")
+
+    return rules
+
+
+def get_rule_by_id(rule_id: str, rules_data: dict | None = None) -> dict | None:
+    """
+    Retrieve a specific rule definition dictionary by its rule ID from the rule pack.
+    Returns None if rule_id is not found or the rule pack cannot be loaded.
+    """
+    if rules_data is None:
+        try:
+            rules_data = load_rules()
+        except Exception:
+            return None
+
+    if not isinstance(rules_data, dict):
+        return None
+
+    for rule in rules_data.get("rules", []):
+        if isinstance(rule, dict) and rule.get("id") == rule_id:
+            return rule
+
+    return None
+
 
 def extract_text(path: Path, mime: str) -> str:
     text = ""
@@ -62,6 +114,37 @@ def store_findings(
 ) -> list[Finding]:
     findings = []
 
+    try:
+        rules_data = load_rules()
+    except Exception as exc:
+        logger.warning("Could not load rule pack in store_findings: %s", exc)
+        rules_data = {}
+
+    def get_deficiency_severity(rule_id: str, default: str) -> str:
+        rule = get_rule_by_id(rule_id, rules_data)
+        if not rule or not isinstance(rule, dict):
+            return default
+        for key in ("fail_severity", "review_severity"):
+            val = rule.get(key)
+            if isinstance(val, str) and val.strip():
+                return val.strip().lower()
+        # For DOC-004, preserve review severity rather than blindly applying low severity
+        if rule_id == "DOC-004":
+            return default
+        val = rule.get("severity")
+        if isinstance(val, str) and val.strip():
+            return val.strip().lower()
+        return default
+
+    def get_pass_severity(rule_id: str, default: str = "low") -> str:
+        rule = get_rule_by_id(rule_id, rules_data)
+        if not rule or not isinstance(rule, dict):
+            return default
+        val = rule.get("pass_severity")
+        if isinstance(val, str) and val.strip():
+            return val.strip().lower()
+        return default
+
     def add(rule, severity, result, message, ref, evidence):
         x = Finding(
             application_id=application_id,
@@ -76,23 +159,23 @@ def store_findings(
         db.add(x)
         findings.append(x)
 
-    # DOC-001: Document classification check
+    # DOC-005: Document classification check
     if doc.doc_type != "Unclassified":
         add(
-            "DOC-001",
-            "low",
+            "DOC-005",
+            get_pass_severity("DOC-005", "low"),
             "VERIFIED",
             f"Document classified as '{doc.doc_type}'. Classification is heuristic and subject to officer review.",
-            "Illustrative rule pack: DOC-001",
+            "Illustrative rule pack: DOC-005",
             {"classified_type": doc.doc_type},
         )
     else:
         add(
-            "DOC-001",
-            "medium",
+            "DOC-005",
+            get_deficiency_severity("DOC-005", "medium"),
             "NEEDS_REVIEW",
             "Document type could not be classified automatically from content or filename. Officer inspection required.",
-            "Illustrative rule pack: DOC-001",
+            "Illustrative rule pack: DOC-005",
             {"classified_type": "Unclassified"},
         )
 
@@ -100,7 +183,7 @@ def store_findings(
     # Must display 'Manual verification required' since no live AICTE API is connected
     add(
         "DOC-002",
-        "high",
+        get_deficiency_severity("DOC-002", "high"),
         "NOT_VERIFIED",
         "Issuer authenticity was not verified: no authorized AICTE or issuer API is configured. Manual verification required.",
         "Illustrative rule pack: DOC-002",
@@ -127,7 +210,7 @@ def store_findings(
 
         add(
             "DOC-003",
-            "medium",
+            get_deficiency_severity("DOC-003", "medium"),
             "NEEDS_REVIEW",
             f"{scope_msg} Review whether reuse across programs or re-submission is legitimate; duplicate file is an informational signal, not proof of fraud.",
             "Illustrative rule pack: DOC-003",
@@ -136,7 +219,7 @@ def store_findings(
     else:
         add(
             "DOC-003",
-            "low",
+            get_pass_severity("DOC-003", "low"),
             "VERIFIED",
             "No identical-file hash match found in this application scope.",
             "Illustrative rule pack: DOC-003",
@@ -148,7 +231,7 @@ def store_findings(
     if doc.extracted_text.strip():
         add(
             "DOC-004",
-            "low",
+            get_pass_severity("DOC-004", "low"),
             "VERIFIED",
             f"Text extraction produced readable content ({len(doc.extracted_text)} characters). Note: Successful extraction is not proof of authenticity or regulatory compliance.",
             "Illustrative rule pack: DOC-004",
@@ -157,7 +240,7 @@ def store_findings(
     else:
         add(
             "DOC-004",
-            "medium",
+            get_deficiency_severity("DOC-004", "medium"),
             "NEEDS_REVIEW",
             "No usable text could be extracted from this document. Try a higher-resolution scan or inspect manually.",
             "Illustrative rule pack: DOC-004",
@@ -174,7 +257,6 @@ def heuristic_risk(findings) -> int:
             score += weights.get(f.severity, 5)
     return min(score, 100)
 
-logger = logging.getLogger("brocode.services")
 
 MEMO_DISCLAIMER = (
     "AI-assisted pre-screening decision-support draft. Does not constitute an official AICTE regulatory decision, "
@@ -349,6 +431,7 @@ SUPPORTED_GEMINI_MODELS = {
     "gemini-3.7-flash",
     "gemini-3.6-flash",
     "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
     "gemini-3.1-flash-lite",
     "gemini-3-flash-preview",
     # Gemini 2.5
@@ -718,6 +801,7 @@ Pre-Screening Findings:
         model_name = candidate_models[model_idx]
         model_failed_with_503 = False
         model_failed_with_timeout = False
+        model_failed_with_429 = False
 
         for attempt in range(max_retries + 1):
             elapsed = time.time() - start_time
@@ -866,12 +950,28 @@ Pre-Screening Findings:
                         "model_used": None,
                     }
 
-                # Requirement 1: Retry only transient errors (503, 429, 408)
+                # Requirement 1 & 6: Handle transient errors (503, 429, 408)
                 if status_code in TRANSIENT_STATUS_CODES:
                     if status_code == 503:
                         model_failed_with_503 = True
+                    elif status_code == 429:
+                        model_failed_with_429 = True
 
-                    final_fallback_reason = f"Gemini API error (HTTP {status_code}: {safe_err or 'service unavailable'})"
+                    final_fallback_reason = (
+                        f"Gemini API quota exceeded (HTTP 429: {safe_err or 'quota exceeded'})"
+                        if status_code == 429
+                        else f"Gemini API error (HTTP {status_code}: {safe_err or 'service unavailable'})"
+                    )
+
+                    # On HTTP 429 quota exhaustion, move to configured fallback model instead of repeatedly retrying exhausted model
+                    if status_code == 429 and model_idx == 0 and fallback_model and fallback_supported and fallback_model not in candidate_models:
+                        logger.warning(
+                            "Gemini API model '%s' returned HTTP 429 (quota exceeded). Moving to fallback model '%s' without retrying exhausted model.",
+                            model_name, fallback_model,
+                        )
+                        candidate_models.append(fallback_model)
+                        break
+
                     if not is_last_attempt and (time.time() - start_time) < max_total_budget:
                         delay = _compute_backoff_delay(attempt, base=0.4, max_delay=1.5)
                         logger.warning(
@@ -930,13 +1030,14 @@ Pre-Screening Findings:
                 final_fallback_reason = f"AI service unavailable ({err_type})"
                 break
 
-        # Requirement 2: If primary model returned 503 (or timeout) after retries,
-        # optionally try a configurable fallback model from .env; do not hardcode an unverified model name.
-        if model_idx == 0 and (model_failed_with_503 or model_failed_with_timeout):
+        # Requirement 2 & 6: If primary model returned 503, timeout, or 429 quota exhaustion,
+        # optionally try a configurable fallback model from settings; do not hardcode an unverified model name.
+        if model_idx == 0 and (model_failed_with_503 or model_failed_with_timeout or model_failed_with_429):
             if fallback_model and fallback_supported and fallback_model not in candidate_models:
+                fail_label = "429 quota" if model_failed_with_429 else ("503" if model_failed_with_503 else "timeout")
                 logger.info(
                     "Primary model '%s' failed (%s). Attempting configured verified fallback model '%s'.",
-                    primary_model, "503" if model_failed_with_503 else "timeout", fallback_model,
+                    primary_model, fail_label, fallback_model,
                 )
                 candidate_models.append(fallback_model)
 

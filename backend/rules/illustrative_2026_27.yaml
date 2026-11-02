@@ -30,7 +30,18 @@ rules:
   - id: DOC-004
     title: Text extraction availability
     severity: low
+    pass_severity: low
+    fail_severity: medium
     type: text_extraction
     required: false
     official_clause: null
     note: Low-quality scans require manual review.
+  - id: DOC-005
+    title: Document classification
+    severity: medium
+    pass_severity: low
+    fail_severity: medium
+    type: document_classification
+    required: false
+    official_clause: null
+    note: Classification is heuristic and requires officer review.
