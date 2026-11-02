@@ -1302,7 +1302,10 @@ class TestRoleSpecificOfficerAndAdminPermissions:
 # 13. Deficiency Memo Assistant Tests
 # ===========================================================================
 class TestDeficiencyMemoAssistant:
-    def test_memo_access_control(self):
+    def test_memo_access_control(self, monkeypatch):
+        from app.config import settings
+        monkeypatch.setattr(settings, "gemini_api_key", "")
+
         admin_token = login_token("admin@example.com", "DemoAdmin123!")
         inst_token = login_token("institution@example.com", "DemoInstitution123!")
         off_token = login_token("officer@example.com", "DemoOfficer123!")
@@ -1366,7 +1369,10 @@ class TestDeficiencyMemoAssistant:
         admin_memo = client.post(f"/api/applications/{app_id}/memo", headers={"Authorization": f"Bearer {admin_token}"})
         assert admin_memo.status_code == 200
 
-    def test_memo_contains_required_sections_and_grounded_findings(self):
+    def test_memo_contains_required_sections_and_grounded_findings(self, monkeypatch):
+        from app.config import settings
+        monkeypatch.setattr(settings, "gemini_api_key", "")
+
         admin_token = login_token("admin@example.com", "DemoAdmin123!")
         inst_token = login_token("institution@example.com", "DemoInstitution123!")
         off_token = login_token("officer@example.com", "DemoOfficer123!")
@@ -1439,7 +1445,10 @@ class TestDeficiencyMemoAssistant:
         assert "Does NOT constitute an official AICTE regulatory decision" in memo_text
         assert data["disclaimer"] is not None
 
-    def test_memo_clean_state_without_deficiencies(self):
+    def test_memo_clean_state_without_deficiencies(self, monkeypatch):
+        from app.config import settings
+        monkeypatch.setattr(settings, "gemini_api_key", "")
+
         admin_token = login_token("admin@example.com", "DemoAdmin123!")
         inst_token = login_token("institution@example.com", "DemoInstitution123!")
         off_token = login_token("officer@example.com", "DemoOfficer123!")
