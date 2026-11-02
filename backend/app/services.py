@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from .models import Document, Finding
 from .config import settings
 
+logger = logging.getLogger("brocode.services")
 RULE_FILE = Path(__file__).resolve().parents[1] / "rules" / "illustrative_2026_27.yaml"
 
 
@@ -47,6 +48,27 @@ def load_rules():
         raise ValueError("Rule pack contains duplicate rule IDs.")
 
     return rules
+
+
+def get_rule_by_id(rule_id: str, rules_data: dict | None = None) -> dict | None:
+    """
+    Retrieve a specific rule definition dictionary by its rule ID from the rule pack.
+    Returns None if rule_id is not found or the rule pack cannot be loaded.
+    """
+    if rules_data is None:
+        try:
+            rules_data = load_rules()
+        except Exception:
+            return None
+
+    if not isinstance(rules_data, dict):
+        return None
+
+    for rule in rules_data.get("rules", []):
+        if isinstance(rule, dict) and rule.get("id") == rule_id:
+            return rule
+
+    return None
 
 
 def extract_text(path: Path, mime: str) -> str:
@@ -92,6 +114,37 @@ def store_findings(
 ) -> list[Finding]:
     findings = []
 
+    try:
+        rules_data = load_rules()
+    except Exception as exc:
+        logger.warning("Could not load rule pack in store_findings: %s", exc)
+        rules_data = {}
+
+    def get_deficiency_severity(rule_id: str, default: str) -> str:
+        rule = get_rule_by_id(rule_id, rules_data)
+        if not rule or not isinstance(rule, dict):
+            return default
+        for key in ("fail_severity", "review_severity"):
+            val = rule.get(key)
+            if isinstance(val, str) and val.strip():
+                return val.strip().lower()
+        # For DOC-004, preserve review severity rather than blindly applying low severity
+        if rule_id == "DOC-004":
+            return default
+        val = rule.get("severity")
+        if isinstance(val, str) and val.strip():
+            return val.strip().lower()
+        return default
+
+    def get_pass_severity(rule_id: str, default: str = "low") -> str:
+        rule = get_rule_by_id(rule_id, rules_data)
+        if not rule or not isinstance(rule, dict):
+            return default
+        val = rule.get("pass_severity")
+        if isinstance(val, str) and val.strip():
+            return val.strip().lower()
+        return default
+
     def add(rule, severity, result, message, ref, evidence):
         x = Finding(
             application_id=application_id,
@@ -110,7 +163,7 @@ def store_findings(
     if doc.doc_type != "Unclassified":
         add(
             "DOC-005",
-            "low",
+            get_pass_severity("DOC-005", "low"),
             "VERIFIED",
             f"Document classified as '{doc.doc_type}'. Classification is heuristic and subject to officer review.",
             "Illustrative rule pack: DOC-005",
@@ -119,7 +172,7 @@ def store_findings(
     else:
         add(
             "DOC-005",
-            "medium",
+            get_deficiency_severity("DOC-005", "medium"),
             "NEEDS_REVIEW",
             "Document type could not be classified automatically from content or filename. Officer inspection required.",
             "Illustrative rule pack: DOC-005",
@@ -130,7 +183,7 @@ def store_findings(
     # Must display 'Manual verification required' since no live AICTE API is connected
     add(
         "DOC-002",
-        "high",
+        get_deficiency_severity("DOC-002", "high"),
         "NOT_VERIFIED",
         "Issuer authenticity was not verified: no authorized AICTE or issuer API is configured. Manual verification required.",
         "Illustrative rule pack: DOC-002",
@@ -157,7 +210,7 @@ def store_findings(
 
         add(
             "DOC-003",
-            "medium",
+            get_deficiency_severity("DOC-003", "medium"),
             "NEEDS_REVIEW",
             f"{scope_msg} Review whether reuse across programs or re-submission is legitimate; duplicate file is an informational signal, not proof of fraud.",
             "Illustrative rule pack: DOC-003",
@@ -166,7 +219,7 @@ def store_findings(
     else:
         add(
             "DOC-003",
-            "low",
+            get_pass_severity("DOC-003", "low"),
             "VERIFIED",
             "No identical-file hash match found in this application scope.",
             "Illustrative rule pack: DOC-003",
@@ -178,7 +231,7 @@ def store_findings(
     if doc.extracted_text.strip():
         add(
             "DOC-004",
-            "low",
+            get_pass_severity("DOC-004", "low"),
             "VERIFIED",
             f"Text extraction produced readable content ({len(doc.extracted_text)} characters). Note: Successful extraction is not proof of authenticity or regulatory compliance.",
             "Illustrative rule pack: DOC-004",
@@ -187,7 +240,7 @@ def store_findings(
     else:
         add(
             "DOC-004",
-            "medium",
+            get_deficiency_severity("DOC-004", "medium"),
             "NEEDS_REVIEW",
             "No usable text could be extracted from this document. Try a higher-resolution scan or inspect manually.",
             "Illustrative rule pack: DOC-004",
@@ -204,7 +257,6 @@ def heuristic_risk(findings) -> int:
             score += weights.get(f.severity, 5)
     return min(score, 100)
 
-logger = logging.getLogger("brocode.services")
 
 MEMO_DISCLAIMER = (
     "AI-assisted pre-screening decision-support draft. Does not constitute an official AICTE regulatory decision, "

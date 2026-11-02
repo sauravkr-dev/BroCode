@@ -30,6 +30,8 @@ rules:
   - id: DOC-004
     title: Text extraction availability
     severity: low
+    pass_severity: low
+    fail_severity: medium
     type: text_extraction
     required: false
     official_clause: null
@@ -37,6 +39,8 @@ rules:
   - id: DOC-005
     title: Document classification
     severity: medium
+    pass_severity: low
+    fail_severity: medium
     type: document_classification
     required: false
     official_clause: null
