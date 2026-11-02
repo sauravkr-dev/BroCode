@@ -1760,8 +1760,8 @@ class TestDeficiencyMemoAssistant:
 
         monkeypatch.setattr("httpx.post", mock_post)
         monkeypatch.setattr(settings, "gemini_api_key", "test-key-safe")
-        # Configure the exact unverified model from the user's issue
-        monkeypatch.setattr(settings, "gemini_model", "gemini-3.5-flash-lite")
+        # Configure an unverified model
+        monkeypatch.setattr(settings, "gemini_model", "gemini-unsupported-model-99")
         monkeypatch.setattr(settings, "gemini_fallback_model", "")
 
         app_dict = {"id": 107, "institution_name": "Unverified Model College", "assigned_officer_name": "Officer Test"}
@@ -1772,7 +1772,7 @@ class TestDeficiencyMemoAssistant:
         assert result["ai_assisted"] is False
         assert result["is_fallback"] is True
         assert result["status"] == "fallback"
-        assert "gemini-3.5-flash-lite" in result["fallback_reason"]
+        assert "gemini-unsupported-model-99" in result["fallback_reason"]
         assert "not in Google's supported Gemini model list" in result["fallback_reason"]
         assert "### 1. Identified Deficiencies & Flagged Pre-Screening Checks" in result["memo"]
 
@@ -2045,6 +2045,126 @@ class TestDeficiencyMemoAssistant:
         assert diag["env_var_override_fallback"] == "gemini-2.5-flash"
         assert diag["is_overridden_by_env"] is True
         assert len(diag["inspected_env_files"]) >= 2
+
+    def test_gemini_35_flash_lite_supported_model_catalog(self):
+        from app.services import is_supported_gemini_model, validate_gemini_models
+
+        # Model ID and namespaced ID must be recognized in supported catalog
+        assert is_supported_gemini_model("gemini-3.5-flash-lite") is True
+        assert is_supported_gemini_model("models/gemini-3.5-flash-lite") is True
+        assert is_supported_gemini_model("GEMINI-3.5-FLASH-LITE") is True
+
+        report = validate_gemini_models(
+            primary_model="gemini-3.5-flash-lite",
+            fallback_model="gemini-2.5-flash",
+            api_key="",
+        )
+        assert report["primary_valid"] is True
+        assert report["fallback_valid"] is True
+
+    def test_memo_429_moves_to_fallback_model_without_repeated_retries(self, monkeypatch):
+        from unittest.mock import MagicMock
+        from app import services
+        from app.config import settings
+
+        call_log = []
+
+        def mock_post(url, **kwargs):
+            call_log.append(url)
+            mock_res = MagicMock()
+            if "gemini-3.5-flash" in url and "lite" not in url:
+                # Quota exceeded on primary
+                mock_res.status_code = 429
+                mock_res.json.return_value = {
+                    "error": {
+                        "code": 429,
+                        "message": "Resource has been exhausted (e.g. check quota).",
+                        "status": "RESOURCE_EXHAUSTED",
+                    }
+                }
+                mock_res.text = "Quota exceeded"
+                return mock_res
+            elif "gemini-3.5-flash-lite" in url or "gemini-2.5-flash" in url:
+                mock_res.status_code = 200
+                mock_res.json.return_value = {
+                    "candidates": [
+                        {
+                            "finishReason": "STOP",
+                            "content": {
+                                "parts": [
+                                    {
+                                        "text": (
+                                            "# AICTE Compliance Pre-Screening Deficiency Memorandum (Draft)\n\n"
+                                            "Successfully generated on fallback model after primary 429 quota exhaustion.\n\n"
+                                            "All pre-screening checks scrutinized. Compliance officer scrutiny and determination are required."
+                                        )
+                                    }
+                                ]
+                            },
+                        }
+                    ]
+                }
+                return mock_res
+            mock_res.status_code = 500
+            return mock_res
+
+        monkeypatch.setattr("httpx.post", mock_post)
+        monkeypatch.setattr(settings, "gemini_api_key", "test-key-safe")
+        monkeypatch.setattr(settings, "gemini_model", "gemini-3.5-flash")
+        monkeypatch.setattr(settings, "gemini_fallback_model", "gemini-3.5-flash-lite")
+        monkeypatch.setattr(settings, "gemini_max_retries", 3)
+
+        app_dict = {"id": 110, "institution_name": "Quota Switch College", "assigned_officer_name": "Officer Test"}
+        result = services.gemini_memo(app_dict, [], sleep_fn=lambda _: None)
+
+        # Primary model must NOT be repeatedly retried on 429; moves straight to fallback model
+        primary_calls = [u for u in call_log if "gemini-3.5-flash" in u and "lite" not in u]
+        fallback_calls = [u for u in call_log if "gemini-3.5-flash-lite" in u]
+
+        assert len(primary_calls) == 1  # Only 1 attempt on exhausted model
+        assert len(fallback_calls) == 1
+        assert result["ai_assisted"] is True
+        assert result["is_fallback"] is False
+        assert result["model_used"] == "gemini-3.5-flash-lite"
+        assert "Successfully generated on fallback model" in result["memo"]
+
+    def test_memo_429_all_models_exhausted_deterministic_fallback(self, monkeypatch):
+        from unittest.mock import MagicMock
+        from app import services
+        from app.config import settings
+
+        call_log = []
+
+        def mock_post(url, **kwargs):
+            call_log.append(url)
+            mock_res = MagicMock()
+            mock_res.status_code = 429
+            mock_res.json.return_value = {
+                "error": {
+                    "code": 429,
+                    "message": "Resource has been exhausted (e.g. check quota).",
+                    "status": "RESOURCE_EXHAUSTED",
+                }
+            }
+            mock_res.text = "Quota exceeded"
+            return mock_res
+
+        monkeypatch.setattr("httpx.post", mock_post)
+        monkeypatch.setattr(settings, "gemini_api_key", "test-key-safe")
+        monkeypatch.setattr(settings, "gemini_model", "gemini-3.5-flash")
+        monkeypatch.setattr(settings, "gemini_fallback_model", "gemini-2.5-flash")
+        monkeypatch.setattr(settings, "gemini_max_retries", 2)
+
+        app_dict = {"id": 111, "institution_name": "All Quota Exhausted College", "assigned_officer_name": "Officer Test"}
+        result = services.gemini_memo(app_dict, [], sleep_fn=lambda _: None)
+
+        assert result["ai_assisted"] is False
+        assert result["is_fallback"] is True
+        assert result["status"] == "fallback"
+        assert "429" in result["fallback_reason"] or "quota" in result["fallback_reason"].lower()
+        assert "### 1. Identified Deficiencies & Flagged Pre-Screening Checks" in result["memo"]
+        assert result["disclaimer"] == services.MEMO_DISCLAIMER
+
 
 
 

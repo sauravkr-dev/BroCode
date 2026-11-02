@@ -431,6 +431,7 @@ SUPPORTED_GEMINI_MODELS = {
     "gemini-3.7-flash",
     "gemini-3.6-flash",
     "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
     "gemini-3.1-flash-lite",
     "gemini-3-flash-preview",
     # Gemini 2.5
@@ -800,6 +801,7 @@ Pre-Screening Findings:
         model_name = candidate_models[model_idx]
         model_failed_with_503 = False
         model_failed_with_timeout = False
+        model_failed_with_429 = False
 
         for attempt in range(max_retries + 1):
             elapsed = time.time() - start_time
@@ -948,12 +950,28 @@ Pre-Screening Findings:
                         "model_used": None,
                     }
 
-                # Requirement 1: Retry only transient errors (503, 429, 408)
+                # Requirement 1 & 6: Handle transient errors (503, 429, 408)
                 if status_code in TRANSIENT_STATUS_CODES:
                     if status_code == 503:
                         model_failed_with_503 = True
+                    elif status_code == 429:
+                        model_failed_with_429 = True
 
-                    final_fallback_reason = f"Gemini API error (HTTP {status_code}: {safe_err or 'service unavailable'})"
+                    final_fallback_reason = (
+                        f"Gemini API quota exceeded (HTTP 429: {safe_err or 'quota exceeded'})"
+                        if status_code == 429
+                        else f"Gemini API error (HTTP {status_code}: {safe_err or 'service unavailable'})"
+                    )
+
+                    # On HTTP 429 quota exhaustion, move to configured fallback model instead of repeatedly retrying exhausted model
+                    if status_code == 429 and model_idx == 0 and fallback_model and fallback_supported and fallback_model not in candidate_models:
+                        logger.warning(
+                            "Gemini API model '%s' returned HTTP 429 (quota exceeded). Moving to fallback model '%s' without retrying exhausted model.",
+                            model_name, fallback_model,
+                        )
+                        candidate_models.append(fallback_model)
+                        break
+
                     if not is_last_attempt and (time.time() - start_time) < max_total_budget:
                         delay = _compute_backoff_delay(attempt, base=0.4, max_delay=1.5)
                         logger.warning(
@@ -1012,13 +1030,14 @@ Pre-Screening Findings:
                 final_fallback_reason = f"AI service unavailable ({err_type})"
                 break
 
-        # Requirement 2: If primary model returned 503 (or timeout) after retries,
-        # optionally try a configurable fallback model from .env; do not hardcode an unverified model name.
-        if model_idx == 0 and (model_failed_with_503 or model_failed_with_timeout):
+        # Requirement 2 & 6: If primary model returned 503, timeout, or 429 quota exhaustion,
+        # optionally try a configurable fallback model from settings; do not hardcode an unverified model name.
+        if model_idx == 0 and (model_failed_with_503 or model_failed_with_timeout or model_failed_with_429):
             if fallback_model and fallback_supported and fallback_model not in candidate_models:
+                fail_label = "429 quota" if model_failed_with_429 else ("503" if model_failed_with_503 else "timeout")
                 logger.info(
                     "Primary model '%s' failed (%s). Attempting configured verified fallback model '%s'.",
-                    primary_model, "503" if model_failed_with_503 else "timeout", fallback_model,
+                    primary_model, fail_label, fallback_model,
                 )
                 candidate_models.append(fallback_model)
 

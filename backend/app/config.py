@@ -1,5 +1,7 @@
 import os
 from pathlib import Path
+from typing import Any
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Determine absolute paths to project directories
@@ -30,8 +32,8 @@ class Settings(BaseSettings):
     max_upload_mb: int = 12
     seed_demo_users: bool = False
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.5-flash"
-    gemini_fallback_model: str = ""
+    gemini_model: str = "gemini-3.5-flash-lite"
+    gemini_fallback_model: str = "gemini-2.5-flash"
     gemini_max_retries: int = 1
     gemini_timeout_seconds: float = 10.0
     model_config = SettingsConfigDict(
@@ -39,6 +41,13 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
     )
+
+    @field_validator("gemini_fallback_model", mode="before")
+    @classmethod
+    def resolve_fallback_model(cls, v: Any) -> str:
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return "gemini-2.5-flash"
+        return v.strip()
 
 
 settings = Settings()
