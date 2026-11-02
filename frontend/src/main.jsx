@@ -807,7 +807,7 @@ function App() {
                           Click &quot;Generate draft&quot; to compile a grounded deficiency memorandum based on current pre-screening findings and application metadata.
                         </p>
                         <div style={{ fontSize: '10.5px', color: '#94a3b8' }}>
-                          ✨ Powered by Gemini 3.5 Flash with deterministic fallback · Strictly grounded in pre-screening findings
+                          ✨ Powered by Gemini 3.5 Flash-lite with deterministic fallback · Strictly grounded in pre-screening findings
                         </div>
                       </div>
                     )}
