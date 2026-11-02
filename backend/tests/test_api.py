@@ -2170,3 +2170,96 @@ class TestDeficiencyMemoAssistant:
 
 
 
+
+
+# ===========================================================================
+# 14. CORS Preflight and HTTP Methods Verification
+# ===========================================================================
+class TestCORSConfiguration:
+    """Verifies that CORS middleware properly handles preflight requests for all required HTTP methods,
+    specifically PUT (document replacement) and DELETE (draft and document deletion), as well as allowed origins.
+    """
+
+    def test_cors_preflight_put_document_replacement(self):
+        """OPTIONS preflight for PUT /api/applications/{id}/documents/{doc_id} must return 200 with PUT in allowed methods."""
+        res = client.options(
+            "/api/applications/1/documents/1",
+            headers={
+                "Origin": "http://localhost:5173",
+                "Access-Control-Request-Method": "PUT",
+                "Access-Control-Request-Headers": "Authorization, Content-Type",
+            },
+        )
+        assert res.status_code == 200
+        assert res.headers.get("access-control-allow-origin") == "http://localhost:5173"
+        assert res.headers.get("access-control-allow-credentials") == "true"
+        allowed_methods = [m.strip() for m in res.headers.get("access-control-allow-methods", "").split(",")]
+        assert "PUT" in allowed_methods
+
+    def test_cors_preflight_delete_draft_application(self):
+        """OPTIONS preflight for DELETE /api/applications/{app_id} must return 200 with DELETE in allowed methods."""
+        res = client.options(
+            "/api/applications/1",
+            headers={
+                "Origin": "http://localhost:5173",
+                "Access-Control-Request-Method": "DELETE",
+                "Access-Control-Request-Headers": "Authorization",
+            },
+        )
+        assert res.status_code == 200
+        assert res.headers.get("access-control-allow-origin") == "http://localhost:5173"
+        allowed_methods = [m.strip() for m in res.headers.get("access-control-allow-methods", "").split(",")]
+        assert "DELETE" in allowed_methods
+
+    def test_cors_preflight_delete_document(self):
+        """OPTIONS preflight for DELETE /api/applications/{app_id}/documents/{doc_id} must permit DELETE."""
+        res = client.options(
+            "/api/applications/1/documents/1",
+            headers={
+                "Origin": "http://localhost:5173",
+                "Access-Control-Request-Method": "DELETE",
+                "Access-Control-Request-Headers": "Authorization",
+            },
+        )
+        assert res.status_code == 200
+        allowed_methods = [m.strip() for m in res.headers.get("access-control-allow-methods", "").split(",")]
+        assert "DELETE" in allowed_methods
+
+    def test_cors_all_required_methods_allowed(self):
+        """Verify that GET, POST, PUT, PATCH, DELETE, OPTIONS are all exposed in access-control-allow-methods."""
+        res = client.options(
+            "/api/applications",
+            headers={
+                "Origin": "http://localhost:5173",
+                "Access-Control-Request-Method": "POST",
+            },
+        )
+        assert res.status_code == 200
+        allowed_methods = {m.strip() for m in res.headers.get("access-control-allow-methods", "").split(",")}
+        expected_methods = {"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}
+        assert expected_methods.issubset(allowed_methods)
+
+    def test_cors_alternate_origin_allowed(self):
+        """Verify that 127.0.0.1:5173 origin is also accepted."""
+        res = client.options(
+            "/api/applications/1/documents/1",
+            headers={
+                "Origin": "http://127.0.0.1:5173",
+                "Access-Control-Request-Method": "PUT",
+                "Access-Control-Request-Headers": "Authorization, Content-Type",
+            },
+        )
+        assert res.status_code == 200
+        assert res.headers.get("access-control-allow-origin") == "http://127.0.0.1:5173"
+
+    def test_cors_disallowed_origin_rejected(self):
+        """Preflight requests from origins not in cors_origins should not receive allow-origin."""
+        res = client.options(
+            "/api/applications/1/documents/1",
+            headers={
+                "Origin": "http://untrusted-external-site.com",
+                "Access-Control-Request-Method": "PUT",
+            },
+        )
+        assert res.status_code == 400
+        assert res.headers.get("access-control-allow-origin") is None
